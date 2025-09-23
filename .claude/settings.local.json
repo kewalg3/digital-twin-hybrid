@@ -1,0 +1,39 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl:*)",
+      "Bash(npx prisma:*)",
+      "Bash(pkill:*)",
+      "Bash(npm run dev:*)",
+      "Bash(npm start)",
+      "Bash(lsof:*)",
+      "Bash(node:*)",
+      "Bash(ls:*)",
+      "Bash(JWT_SECRET=test-secret node ../test-upload.cjs)",
+      "Bash(echo:*)",
+      "Bash(rm:*)",
+      "Bash(/Users/kewalgosrani/digital-twin-hybrid/backend/test-upload.js )",
+      "Bash(/Users/kewalgosrani/digital-twin-hybrid/backend/test-server.js )",
+      "Bash(/Users/kewalgosrani/digital-twin-hybrid/backend/test-user.js )",
+      "Bash(/Users/kewalgosrani/digital-twin-hybrid/backend/create-test-user.js )",
+      "Bash(/Users/kewalgosrani/digital-twin-hybrid/backend.log )",
+      "Bash(/Users/kewalgosrani/digital-twin-hybrid/frontend.log )",
+      "Bash(/Users/kewalgosrani/digital-twin-hybrid/debug-voice.js )",
+      "Bash(/Users/kewalgosrani/digital-twin-hybrid/test-upload.html )",
+      "Bash(/Users/kewalgosrani/digital-twin-hybrid/test-voice-socket.html)",
+      "Bash(/Users/kewalgosrani/digital-twin-hybrid/backend/frontend.log )",
+      "Bash(/Users/kewalgosrani/digital-twin-hybrid/backend/server.log )",
+      "Bash(/Users/kewalgosrani/digital-twin-hybrid/backend/*.mp3)",
+      "Bash(/Users/kewalgosrani/digital-twin-hybrid/backend/*.wav)",
+      "Bash(/Users/kewalgosrani/digital-twin-hybrid/backend/test_resume.*)",
+      "Bash(grep:*)",
+      "Bash(npm run:*)",
+      "Bash(npx tsc:*)",
+      "Bash(kill:*)",
+      "Bash(cp:*)",
+      "Bash(find:*)",
+      "WebFetch(domain:dev.hume.ai)"
+    ],
+    "deny": []
+  }
+}

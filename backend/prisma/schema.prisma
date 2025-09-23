@@ -1,0 +1,262 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                   String                @id @default(cuid())
+  email                String                @unique
+  passwordHash         String
+  firstName            String?
+  lastName             String?
+  fullName             String?
+  phone                String?
+  linkedinUrl          String?
+  city                 String?
+  state                String?
+  country              String?
+  zipCode              String?
+  address              String?
+  profileComplete      Boolean               @default(false)
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  conversations        Conversation[]
+  eviInterviewSessions EVIInterviewSession[]
+  experiences          Experience[]
+  onboardingStatus     OnboardingStatus?
+  resumes              Resume[]
+  skillsets            Skillset[]
+  software             Software[]
+  voiceProfiles        VoiceProfile[]
+
+  @@map("users")
+}
+
+model Resume {
+  id                String   @id @default(cuid())
+  userId            String
+  originalFilename  String
+  fileUrl           String
+  fileSize          Int?
+  mimeType          String?
+  parsedContent     Json?
+  rawText           String?
+  extractedName     String?
+  extractedEmail    String?
+  extractedPhone    String?
+  extractedAddress  String?
+  totalExperience   Int?
+  industryType      String?
+  parsingStatus     String   @default("pending")
+  parsingError      String?
+  skillsExtracted   String[]
+  professionalSummary String? @db.Text
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  extractedCity     String?
+  extractedCountry  String?
+  extractedLinkedIn String?
+  extractedState    String?
+  extractedZipCode  String?
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("resumes")
+}
+
+model Experience {
+  id             String    @id @default(cuid())
+  userId         String
+  jobTitle       String
+  company        String
+  location       String?
+  employmentType String?
+  startDate      DateTime
+  endDate        DateTime?
+  isCurrentRole  Boolean   @default(false)
+  duration       String?
+  description    String?
+  achievements   String[]
+  keySkills      String[]
+  source         String    @default("manual")
+  displayOrder   Int       @default(0)
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+  user           User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  interviews     EVIInterviewSession[]
+
+  @@map("experiences")
+}
+
+model OnboardingStatus {
+  id                    String    @id @default(cuid())
+  userId                String    @unique
+  basicInfoCompleted    Boolean   @default(false)
+  resumeUploaded        Boolean   @default(false)
+  resumeParsed          Boolean   @default(false)
+  experienceCompleted   Boolean   @default(false)
+  skillsCompleted       Boolean   @default(false)
+  profileCompleted      Boolean   @default(false)
+  completionPercentage  Int       @default(0)
+  currentStep           String    @default("basic_info")
+  resumeUploadedAt      DateTime?
+  experienceCompletedAt DateTime?
+  skillsCompletedAt     DateTime?
+  profileCompletedAt    DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("onboarding_status")
+}
+
+model Skillset {
+  id           String    @id @default(cuid())
+  userId       String
+  name         String
+  category     String
+  subcategory  String?
+  proficiency  String?
+  yearsOfExp   Int?
+  source       String    @default("manual")
+  isVerified   Boolean   @default(false)
+  lastUsed     DateTime?
+  experienceId String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, name, category])
+  @@map("skillsets")
+}
+
+model Software {
+  id           String    @id @default(cuid())
+  userId       String
+  name         String
+  category     String
+  subcategory  String?
+  version      String?
+  proficiency  String?
+  yearsOfExp   Int?
+  source       String    @default("manual")
+  isVerified   Boolean   @default(false)
+  lastUsed     DateTime?
+  experienceId String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, name, category])
+  @@map("software")
+}
+
+model VoiceProfile {
+  id            String   @id @default(cuid())
+  userId        String
+  humeVoiceId   String
+  voiceName     String
+  voiceSettings Json?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("voice_profiles")
+}
+
+model Conversation {
+  id               String    @id @default(cuid())
+  userId           String
+  title            String?
+  status           String    @default("active")
+  participantType  String    @default("recruiter")
+  conversationData Json?
+  totalMessages    Int       @default(0)
+  startedAt        DateTime  @default(now())
+  endedAt          DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("conversations")
+}
+
+model EVIInterviewSession {
+  id                   String                @id @default(cuid())
+  userId               String
+  experienceId         String?               // Link to specific experience
+  jobTitle             String
+  company              String
+  jobDescription       String?
+  duration             String?
+  sessionStartTime     DateTime              @default(now())
+  sessionEndTime       DateTime?
+  totalDurationSeconds Int?
+  questionsAsked       Int                   @default(0)
+  fullTranscript       Json
+  achievements         Json?
+  interviewBrief       Json?                 // AI-generated brief from transcript
+  audioFileUrl         String?
+  humeSessionId        String?
+  humeConfigId         String?
+  selectedVoice        String                @default("luna")
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  skills               String[]              @default([])
+  software             String[]              @default([])
+  interviewType        String                @default("job_experience")
+  messages             EVIInterviewMessage[]
+  user                 User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  experience           Experience?           @relation(fields: [experienceId], references: [id], onDelete: SetNull)
+  recruiterInterviews  RecruiterInterview[]
+
+  @@map("evi_interview_sessions")
+}
+
+model EVIInterviewMessage {
+  id                   String              @id @default(cuid())
+  sessionId            String
+  aiQuestion           String
+  candidateResponse    String
+  messageOrder         Int
+  candidateEmotionsRaw Json?
+  questionAskedAt      DateTime
+  responseGivenAt      DateTime
+  session              EVIInterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@map("evi_interview_messages")
+}
+
+model Recruiter {
+  id          String               @id @default(cuid())
+  name        String
+  email       String?              @unique
+  title       String?
+  company     String?
+  linkedinUrl String?
+  phone       String?
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  interviews  RecruiterInterview[]
+
+  @@map("recruiters")
+}
+
+model RecruiterInterview {
+  id                    String              @id @default(cuid())
+  recruiterId           String
+  eviInterviewSessionId String
+  position              String?
+  jobDescription        String?
+  notes                 String?
+  createdAt             DateTime            @default(now())
+  eviInterviewSession   EVIInterviewSession @relation(fields: [eviInterviewSessionId], references: [id])
+  recruiter             Recruiter           @relation(fields: [recruiterId], references: [id])
+
+  @@unique([recruiterId, eviInterviewSessionId])
+  @@map("recruiter_interviews")
+}
