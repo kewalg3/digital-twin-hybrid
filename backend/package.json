@@ -4,12 +4,16 @@
   "description": "Backend for Digital Twin Voice Interview Platform",
   "main": "src/app.js",
   "scripts": {
-    "start": "node src/app.js",
-    "dev": "nodemon src/app.js",
+    "start": "NODE_ENV=production node src/app.js",
+    "dev": "NODE_ENV=development nodemon src/app.js",
+    "start:prod": "NODE_ENV=production node src/app.js",
+    "start:dev": "NODE_ENV=development node src/app.js",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
+    "db:push:dev": "NODE_ENV=development prisma db push",
+    "db:push:prod": "NODE_ENV=production prisma db push",
     "db:migrate": "prisma migrate dev",
-    "db:studio": "prisma studio",
+    "db:studio": "NODE_ENV=development prisma studio",
     "test": "jest"
   },
   "dependencies": {

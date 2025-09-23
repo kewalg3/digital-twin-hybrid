@@ -7,7 +7,10 @@ const rateLimit = require('express-rate-limit');
 const fileUpload = require('express-fileupload');
 const { createServer } = require('http');
 // Removed Socket.IO - using direct Hume WebSocket instead
-require('dotenv').config();
+// Load environment-specific .env file
+const envFile = process.env.NODE_ENV === 'production' ? '.env.production' : '.env.development';
+require('dotenv').config({ path: envFile });
+console.log(`🔧 Loaded environment: ${process.env.NODE_ENV || 'development'} from ${envFile}`);
 
 
 const { PrismaClient } = require('@prisma/client');
