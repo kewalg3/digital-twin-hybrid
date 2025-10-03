@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Connection Test</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #1a1a1a; color: #0f0; }
+        .log { margin: 5px 0; padding: 5px; border-left: 3px solid #0f0; background: #000; }
+        .error { border-color: #f00; color: #f00; }
+        .success { border-color: #0f0; color: #0f0; }
+        .info { border-color: #00f; color: #00f; }
+        button { margin: 10px 5px; padding: 10px 20px; background: #333; color: #fff; border: 1px solid #666; cursor: pointer; }
+        button:hover { background: #444; }
+        input { width: 100%; padding: 10px; margin: 10px 0; background: #222; color: #fff; border: 1px solid #444; }
+    </style>
+</head>
+<body>
+    <h1>WebSocket Connection Test for Hume EVI</h1>
+
+    <div>
+        <label>User ID:</label>
+        <input type="text" id="userId" value="clzhjk21d0000wgqbhtwb8npp" />
+
+        <label>Job Title (for specific experience):</label>
+        <input type="text" id="jobTitle" value="Senior Full Stack Engineer" />
+
+        <label>Company (for specific experience):</label>
+        <input type="text" id="company" value="Acme Corp" />
+    </div>
+
+    <div>
+        <button onclick="testBackendConfig()">1. Test Backend Config Creation</button>
+        <button onclick="testDirectWebSocket()">2. Test Direct WebSocket</button>
+        <button onclick="testSDKConnection()">3. Test SDK Connection</button>
+        <button onclick="clearLogs()">Clear Logs</button>
+    </div>
+
+    <div id="logs"></div>
+
+    <script>
+        let accessToken = null;
+        let configId = null;
+
+        function log(message, type = 'info') {
+            const logs = document.getElementById('logs');
+            const entry = document.createElement('div');
+            entry.className = `log ${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logs.insertBefore(entry, logs.firstChild);
+        }
+
+        function clearLogs() {
+            document.getElementById('logs').innerHTML = '';
+        }
+
+        async function testBackendConfig() {
+            log('Starting backend config test...', 'info');
+
+            const userId = document.getElementById('userId').value;
+            const jobTitle = document.getElementById('jobTitle').value;
+            const company = document.getElementById('company').value;
+
+            try {
+                // Create config via backend
+                log('Creating EVI config via backend...', 'info');
+                const response = await fetch('http://localhost:3001/api/evi-config/create', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        userId,
+                        jobTitle,
+                        company,
+                        interviewType: 'job_experience'
+                    })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(`Backend error: ${JSON.stringify(data)}`);
+                }
+
+                accessToken = data.accessToken;
+                configId = data.configId;
+
+                log(`✅ Config created successfully!`, 'success');
+                log(`Config ID: ${configId}`, 'success');
+                log(`Access Token (first 50 chars): ${accessToken?.substring(0, 50)}...`, 'success');
+                log(`Token type: ${typeof accessToken}`, 'info');
+                log(`Token starts with 'eyJ': ${accessToken?.startsWith('eyJ')}`, 'info');
+
+                // Decode JWT to check expiration
+                try {
+                    const parts = accessToken.split('.');
+                    const payload = JSON.parse(atob(parts[1]));
+                    const exp = new Date(payload.exp * 1000);
+                    log(`Token expires at: ${exp.toLocaleString()}`, 'info');
+                    log(`Token is valid for: ${Math.floor((exp - new Date()) / 1000 / 60)} minutes`, 'info');
+                } catch (e) {
+                    log('Could not decode token payload', 'error');
+                }
+
+            } catch (error) {
+                log(`❌ Backend config test failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function testDirectWebSocket() {
+            if (!accessToken || !configId) {
+                log('❌ Please run backend config test first to get access token and config ID', 'error');
+                return;
+            }
+
+            log('Starting direct WebSocket test...', 'info');
+
+            try {
+                const wsUrl = `wss://api.hume.ai/v0/evi/chat?access_token=${accessToken}&config_id=${configId}`;
+                log(`Connecting to: ${wsUrl.substring(0, 80)}...`, 'info');
+
+                const ws = new WebSocket(wsUrl);
+
+                ws.onopen = () => {
+                    log('✅ WebSocket connection opened!', 'success');
+
+                    // Send initial message
+                    const message = {
+                        type: 'audio_input',
+                        data: ''  // Empty audio to start
+                    };
+                    ws.send(JSON.stringify(message));
+                    log('Sent initial message', 'info');
+                };
+
+                ws.onmessage = (event) => {
+                    log(`Received message: ${event.data.substring(0, 100)}...`, 'info');
+                };
+
+                ws.onerror = (error) => {
+                    log(`❌ WebSocket error: ${error}`, 'error');
+                    console.error('Full WebSocket error:', error);
+                };
+
+                ws.onclose = (event) => {
+                    log(`WebSocket closed. Code: ${event.code}, Reason: ${event.reason}`, event.code === 1000 ? 'info' : 'error');
+                };
+
+            } catch (error) {
+                log(`❌ Direct WebSocket test failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function testSDKConnection() {
+            if (!accessToken || !configId) {
+                log('❌ Please run backend config test first to get access token and config ID', 'error');
+                return;
+            }
+
+            log('Starting SDK connection test...', 'info');
+
+            // Load Hume SDK
+            if (!window.Hume) {
+                log('Loading Hume SDK...', 'info');
+                const script = document.createElement('script');
+                script.src = 'https://unpkg.com/@humeai/voice@0.2.10/dist/index.umd.js';
+                script.onload = () => {
+                    log('SDK loaded, attempting connection...', 'info');
+                    connectWithSDK();
+                };
+                document.head.appendChild(script);
+            } else {
+                connectWithSDK();
+            }
+        }
+
+        async function connectWithSDK() {
+            try {
+                const { HumeClient } = window.Hume;
+
+                log('Creating Hume client...', 'info');
+                const client = new HumeClient({
+                    apiKey: '', // Not needed when using access token
+                    secretKey: '', // Not needed when using access token
+                });
+
+                log('Connecting to EVI...', 'info');
+                const chat = await client.empathicVoice.chat.connect({
+                    configId: configId,
+                    accessToken: accessToken,
+                    debug: true
+                });
+
+                chat.on('open', () => {
+                    log('✅ SDK WebSocket connection opened!', 'success');
+                });
+
+                chat.on('message', (message) => {
+                    log(`SDK message: ${JSON.stringify(message).substring(0, 100)}...`, 'info');
+                });
+
+                chat.on('error', (error) => {
+                    log(`❌ SDK error: ${error}`, 'error');
+                });
+
+                chat.on('close', () => {
+                    log('SDK connection closed', 'info');
+                });
+
+            } catch (error) {
+                log(`❌ SDK connection test failed: ${error.message}`, 'error');
+                console.error('Full SDK error:', error);
+            }
+        }
+    </script>
+</body>
+</html>
