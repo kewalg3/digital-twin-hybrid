@@ -38,17 +38,18 @@ class DirectHumeEVI {
   private audioPlayer: EVIWebAudioPlayer | null = null;
   private mediaStream: MediaStream | null = null;
   private recorder: MediaRecorder | null = null;
-  
+
   // Session management
   private currentSession: EVISessionData | null = null;
   private isConnecting: boolean = false;
   private isRecording: boolean = false;
   private isEnding: boolean = false;
   private transcript: EVIMessage[] = [];
-  
+
   // Event handlers
   private messageHandlers: Map<string, Function> = new Map();
-  
+  private audioEndHandlerAttached: boolean = false;
+
   // Backend API base URL
   private baseUrl: string;
 
@@ -72,10 +73,19 @@ class DirectHumeEVI {
       throw new Error('Interview already active or connecting');
     }
 
+    // Reset audio player state for new interview
+    this.audioPlayer = null;
+    this.audioEndHandlerAttached = false;
+
     this.isConnecting = true;
     console.log('🚀 Connecting to existing EVI config...');
 
     try {
+      // Get audio stream first for proper SDK initialization (CRITICAL FIX)
+      console.log('🎤 Getting audio stream for SDK...');
+      this.mediaStream = await getAudioStream();
+      console.log('✅ Audio stream obtained for SDK');
+
       // Create socket configuration with existing config
       console.log('🔌 Creating socket configuration with existing config...');
       const socketConfig = createSocketConfig({
@@ -89,7 +99,7 @@ class DirectHumeEVI {
 
       // Create VoiceClient with socket config
       this.voiceClient = new VoiceClient(socketConfig);
-      
+
       // Set up event handlers
       this.setupVoiceClientHandlers();
 
@@ -124,6 +134,10 @@ class DirectHumeEVI {
     if (this.isConnecting || this.currentSession) {
       throw new Error('Interview already active or connecting');
     }
+
+    // Reset audio player state for new interview
+    this.audioPlayer = null;
+    this.audioEndHandlerAttached = false;
 
     this.isConnecting = true;
     console.log('🚀 Starting direct EVI interview with SDK...');
@@ -185,35 +199,87 @@ class DirectHumeEVI {
 
       const { accessToken } = await tokenResponse.json();
 
+      // Debug: Log token details
+      console.log('🔐 Access Token received:', {
+        tokenPreview: accessToken.substring(0, 50) + '...',
+        tokenLength: accessToken.length,
+        tokenType: typeof accessToken,
+        startsWithEyJ: accessToken.startsWith('eyJ')
+      });
+
       // Step 3: Create socket configuration
       console.log('🔌 Creating socket configuration...');
+      console.log('🆔 Using Config ID:', configId);
+
       const socketConfig = createSocketConfig({
         auth: {
           type: 'accessToken',  // Use accessToken, not apiKey
           value: accessToken
         },
         configId: configId,
-        debug: false // Disable debug to reduce console noise
+        debug: true // Enable debug temporarily to see what's happening
       });
 
-      // Step 4: Create VoiceClient with socket config
+      // Step 4: Get audio stream first for proper SDK initialization
+      console.log('🎤 Getting audio stream for SDK...');
+      this.mediaStream = await getAudioStream();
+      console.log('✅ Audio stream obtained for SDK');
+
+      // Step 5: Create VoiceClient with socket config and audio stream
       this.voiceClient = new VoiceClient(socketConfig);
-      
+
       // Set up event handlers
       this.setupVoiceClientHandlers();
 
-      // Connect to Hume
-      await this.voiceClient.connect();
-      console.log('✅ Connected to Hume EVI via SDK');
+      // Connect to Hume (no parameters)
+      console.log('🔗 Attempting WebSocket connection to Hume...');
+      try {
+        // Connect without parameters - audio will be sent manually after connection
+        await this.voiceClient.connect();
+        console.log('✅ Connected to Hume EVI via SDK');
+      } catch (wsError: any) {
+        console.error('🔴 WebSocket Connection Error:', {
+          message: wsError.message,
+          stack: wsError.stack,
+          error: wsError,
+          configId: configId,
+          tokenLength: accessToken?.length
+        });
+
+        // Test raw WebSocket as diagnostic
+        console.log('🧪 Testing raw WebSocket connection as diagnostic...');
+        const testWsUrl = `wss://api.hume.ai/v0/evi/chat?access_token=${accessToken}&config_id=${configId}`;
+        const testWs = new WebSocket(testWsUrl);
+
+        testWs.onopen = () => {
+          console.log('✅ Raw WebSocket connected successfully! Issue is with SDK configuration.');
+          testWs.close();
+        };
+
+        testWs.onerror = (e) => {
+          console.error('❌ Raw WebSocket also failed:', e);
+          console.log('🔍 This indicates an authentication or network issue, not SDK issue');
+        };
+
+        // Try to provide more specific error message
+        if (wsError.message?.includes('401') || wsError.message?.includes('Unauthorized')) {
+          throw new Error('Authentication failed: Invalid or expired access token');
+        } else if (wsError.message?.includes('404')) {
+          throw new Error('Configuration not found: The EVI config may have expired or been deleted');
+        } else if (wsError.message?.includes('network')) {
+          throw new Error('Network error: Unable to connect to Hume servers');
+        }
+        throw wsError;
+      }
 
       this.currentSession = {
         sessionId,
-        interviewId, 
+        interviewId,
         configId,
         status: 'connecting'  // Will be updated to 'connected' in 'open' event
       };
 
-      // Audio initialization happens in the 'open' event handler
+      // Audio is already connected to SDK
       return this.currentSession;
 
     } catch (error) {
@@ -235,23 +301,24 @@ class DirectHumeEVI {
     this.voiceClient.on('open', async () => {
       console.log('✅ WebSocket connection opened');
       this.isConnecting = false;
-      
-      // Initialize only microphone audio after connection is established
+
+      // Start audio recording after connection is established
       try {
-        await this.initializeAudio();
-        console.log('✅ Microphone audio initialized - ready for recording');
-        console.log('🔊 Audio player will be initialized when first AI audio is received');
-        
-        // Update session status
-        if (this.currentSession) {
-          this.currentSession.status = 'connected';
-        }
-        
-        this.emit('connected');
+        await this.startAudioRecording();
+        console.log('✅ Audio recording started');
       } catch (error) {
-        console.error('❌ Audio initialization failed:', error);
+        console.error('❌ Failed to start audio recording:', error);
         this.emit('error', error);
       }
+
+      console.log('🔊 Audio player will be initialized when first AI audio is received');
+
+      // Update session status
+      if (this.currentSession) {
+        this.currentSession.status = 'connected';
+      }
+
+      this.emit('connected');
     });
 
     // Handle messages
@@ -397,6 +464,17 @@ class DirectHumeEVI {
       console.log('🔊 Initializing Hume audio player...');
       this.audioPlayer = new EVIWebAudioPlayer();
       await this.audioPlayer.init();
+
+      // Set up audio end detection ONLY ONCE when player is initialized
+      if (!this.audioEndHandlerAttached) {
+        this.audioPlayer.on('end', () => {
+          console.log('✅ AI audio playback completed');
+          this.emit('audio_end'); // Signal audio playback ended
+        });
+        this.audioEndHandlerAttached = true;
+        console.log('✅ Audio end handler attached');
+      }
+
       console.log('✅ Hume audio player initialized');
     } catch (error) {
       console.error('❌ Error initializing audio player:', error);
@@ -416,16 +494,13 @@ class DirectHumeEVI {
 
       console.log('🔊 Playing AI audio via Hume player...');
       this.emit('audio_start'); // Signal audio playback started
-      
+
       // Use Hume's proper audio player to handle streaming audio
       await this.audioPlayer.enqueue(message);
-      
-      // Set up audio end detection
-      this.audioPlayer.on('end', () => {
-        console.log('✅ AI audio playback completed');
-        this.emit('audio_end'); // Signal audio playback ended
-      });
-      
+
+      // Event handler is already attached in initializeAudioPlayer
+      // No need to add it again here
+
       console.log('✅ AI audio enqueued for playback');
       
     } catch (error) {
@@ -435,153 +510,67 @@ class DirectHumeEVI {
   }
 
   /**
-   * Initialize audio
+   * Start audio recording with MediaRecorder
    */
-  private async initializeAudio(): Promise<void> {
-    try {
-      console.log('🎤 Initializing audio...');
-      
-      // Check microphone permissions first
-      try {
-        const permissionResult = await navigator.permissions.query({ name: 'microphone' as PermissionName });
-        console.log('🎤 Microphone permission status:', permissionResult.state);
-      } catch (e) {
-        console.log('⚠️ Could not check microphone permissions');
-      }
-      
-      // Get audio stream with Hume's helper
-      this.mediaStream = await getAudioStream();
-      console.log('✅ Audio stream obtained');
-      
-      // Verify audio stream
-      if (this.mediaStream) {
-        const audioTracks = this.mediaStream.getAudioTracks();
-        console.log('🎵 Audio tracks found:', audioTracks.length);
-        if (audioTracks.length > 0) {
-          console.log('🎵 First audio track settings:', audioTracks[0].getSettings());
-          console.log('🎵 First audio track enabled:', audioTracks[0].enabled);
-          console.log('🎵 First audio track ready state:', audioTracks[0].readyState);
-          console.log('🎵 First audio track label:', audioTracks[0].label);
-          
-          // Test if audio is actually being captured
-          try {
-            const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-            const source = audioContext.createMediaStreamSource(this.mediaStream);
-            const analyser = audioContext.createAnalyser();
-            source.connect(analyser);
-            
-            const dataArray = new Uint8Array(analyser.frequencyBinCount);
-            analyser.getByteFrequencyData(dataArray);
-            
-            const sum = dataArray.reduce((a, b) => a + b, 0);
-            console.log('🎵 Audio level test - sum:', sum, 'dataArray length:', dataArray.length);
-            
-            audioContext.close();
-          } catch (audioTestError) {
-            console.warn('⚠️ Audio level test failed:', audioTestError);
-          }
+  private async startAudioRecording(): Promise<void> {
+    console.log('🎤 Starting audio recording...');
+
+    if (!this.mediaStream) {
+      throw new Error('No media stream available');
+    }
+
+    if (!this.voiceClient) {
+      throw new Error('Voice client not connected');
+    }
+
+    // Set up MediaRecorder
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+      ? 'audio/webm;codecs=opus'
+      : 'audio/webm';
+
+    console.log('🎤 Using MIME type:', mimeType);
+    this.recorder = new MediaRecorder(this.mediaStream, { mimeType });
+
+    // Handle audio data
+    this.recorder.ondataavailable = async (event: BlobEvent) => {
+      if (event.data.size > 0 && this.voiceClient) {
+        try {
+          // Convert Blob to ArrayBuffer
+          const arrayBuffer = await event.data.arrayBuffer();
+
+          // Send as Uint8Array which is what Hume expects
+          const audioData = new Uint8Array(arrayBuffer);
+
+          // Send audio to Hume
+          this.voiceClient.sendAudio(audioData);
+          console.log('🎤 Audio chunk sent - size:', audioData.length, 'bytes');
+        } catch (error) {
+          console.error('❌ Error sending audio:', error);
         }
       }
-      
-    } catch (error) {
-      console.error('❌ Error initializing audio:', error);
-      
-      // Provide specific error messages
-      if (error.name === 'NotAllowedError') {
-        throw new Error('Microphone access denied. Please allow microphone permissions and try again.');
-      } else if (error.name === 'NotFoundError') {
-        throw new Error('No microphone found. Please connect a microphone and try again.');
-      } else {
-        throw new Error(`Failed to initialize audio: ${error.message}`);
-      }
-    }
+    };
+
+    this.recorder.onstart = () => {
+      console.log('🎤 MediaRecorder started');
+      this.isRecording = true;
+    };
+
+    this.recorder.onerror = (error) => {
+      console.error('❌ MediaRecorder error:', error);
+    };
+
+    // Start recording with 100ms chunks
+    this.recorder.start(100);
+    console.log('✅ Audio recording started');
   }
 
   /**
-   * Start recording
+   * Start recording (for compatibility with UI)
    */
   async startRecording(): Promise<void> {
-    console.log('🎤 startRecording called. Current state:', {
-      hasVoiceClient: !!this.voiceClient,
-      hasMediaStream: !!this.mediaStream,
-      isRecording: this.isRecording,
-      currentSession: !!this.currentSession
-    });
-
-    if (!this.voiceClient) {
-      console.error('❌ Voice client not available. Connection may have been lost.');
-      throw new Error('Voice client not connected');
-    }
-    
-    if (!this.mediaStream) {
-      console.error('❌ Media stream not available. Audio may not be initialized.');
-      throw new Error('Audio not initialized - microphone access required');
-    }
-
-    if (this.isRecording) {
-      console.log('⚠️ Already recording');
-      return;
-    }
-
-    try {
-      console.log('🎤 Starting/Resuming recording...');
-      
-      // Create new MediaRecorder for resume (old one may be in 'inactive' state)
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') 
-        ? 'audio/webm;codecs=opus' 
-        : 'audio/webm';
-      
-      console.log('🎤 Using MIME type:', mimeType);
-      this.recorder = new MediaRecorder(this.mediaStream, { mimeType });
-      
-      this.recorder.ondataavailable = async (event: BlobEvent) => {
-        console.log('🎤 MediaRecorder data available - size:', event.data.size, 'type:', event.data.type);
-        
-        if (event.data.size > 0 && this.voiceClient) {
-          try {
-            console.log('🎤 Sending audio blob directly - size:', event.data.size, 'type:', event.data.type);
-            
-            // Send audio blob directly to VoiceClient
-            await this.voiceClient.sendAudio(event.data);
-            console.log('✅ Audio sent successfully to Hume');
-          } catch (error) {
-            console.error('❌ Error sending audio:', error);
-          }
-        } else if (event.data.size === 0) {
-          console.warn('⚠️ Received empty audio data');
-        } else if (!this.voiceClient) {
-          console.warn('⚠️ VoiceClient not available when trying to send audio');
-        }
-      };
-      
-      this.recorder.onstart = () => {
-        console.log('🎤 MediaRecorder started');
-      };
-      
-      this.recorder.onpause = () => {
-        console.log('🎤 MediaRecorder paused');
-      };
-      
-      this.recorder.onresume = () => {
-        console.log('🎤 MediaRecorder resumed');
-      };
-      
-      this.recorder.onstop = () => {
-        console.log('🎤 MediaRecorder stopped');
-      };
-      
-      this.recorder.onerror = (error) => {
-        console.error('❌ MediaRecorder error:', error);
-      };
-
-      this.recorder.start(100); // 100ms chunks
-      this.isRecording = true;
-      console.log('✅ Recording started/resumed');
-      
-    } catch (error) {
-      console.error('❌ Error starting recording:', error);
-      throw error;
-    }
+    console.log('🎤 startRecording called');
+    // Recording is already started in the 'open' event handler
+    // This method is kept for UI compatibility
   }
 
   /**
@@ -642,8 +631,8 @@ class DirectHumeEVI {
 
     try {
       console.log('🏁 Ending interview...');
-      
-      // Stop recording first
+
+      // SDK will stop audio handling on disconnect
       this.stopRecording();
       
       // Gracefully disconnect voice client
@@ -763,6 +752,20 @@ class DirectHumeEVI {
       // Cleanup audio player
       if (this.audioPlayer) {
         try {
+          // Remove event listeners before disposal
+          if (this.audioEndHandlerAttached) {
+            this.audioPlayer.off('end');
+            this.audioEndHandlerAttached = false;
+            console.log('🧹 Removed audio end event listener');
+          }
+
+          // Stop any playing audio before disposal
+          try {
+            this.audioPlayer.stop();
+          } catch (e) {
+            // Ignore stop errors
+          }
+
           this.audioPlayer.dispose();
         } catch (e) {
           // Ignore dispose errors

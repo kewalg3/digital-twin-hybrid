@@ -38,12 +38,13 @@ interface Job {
   software: string[];
   aiSuggestedSkills: string[];
   aiSuggestedSoftware: string[];
+  allExperiences?: Experience[]; // For combined interviews
 }
 
 interface EVIInterviewDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  job: Job;
+  job: Job | null;
   experienceId?: string;
   onInterviewComplete?: (enrichedData: any) => void;
 }
@@ -76,10 +77,12 @@ export default function EVIInterviewDialog({ isOpen, onClose, job, experienceId,
   const currentApiInstance = useRef<any>(null);
   const timeoutWarningShown = useRef<boolean>(false);
   const autoCompletionTriggered = useRef<boolean>(false);
+  const transcriptContainerRef = useRef<HTMLDivElement>(null);
   
-  // Timeout constants
-  const MAX_INTERVIEW_DURATION = 300; // 5 minutes in seconds
-  const WARNING_TIME = 180; // Show warning at 3 minutes (2 min remaining)
+  // Timeout constants - all interviews are now 15 minutes
+  const isCombinedInterview = job?.allExperiences && job.allExperiences.length > 0;
+  const MAX_INTERVIEW_DURATION = 900; // All interviews are now 15 minutes
+  const WARNING_TIME = 780; // Warning at 13 minutes
 
   // DEBUG: Expose debugging functions to window for manual testing
   useEffect(() => {
@@ -211,19 +214,17 @@ export default function EVIInterviewDialog({ isOpen, onClose, job, experienceId,
       setConnectionStatus('connecting');
       
       const jobContext = {
-        title: job.title,
-        company: job.company,
-        description: job.description || 'No description available',
-        duration: job.duration,
-        location: job.location || 'Remote',
-        skills: job.skills || [],
-        software: job.software || [],
-        experienceId: experienceId
+        ...job, // Spread all properties including allExperiences
+        experienceId: experienceId,
+        candidateName: user?.name || user?.email?.split('@')[0] || 'Candidate',
+        userId: user?.id
       };
-      
+
       console.log('🚀 Starting DIRECT connection to Hume EVI...');
       console.log('📋 Job context:', jobContext);
-      console.log('👤 User ID:', user?.id);
+      console.log('✅ Has allExperiences:', !!jobContext.allExperiences);
+      console.log('📊 Experience count:', jobContext.allExperiences?.length || 0);
+      console.log('👤 User:', { id: user?.id, name: user?.name });
       
       // Connect directly to Hume (no backend proxy!)
       const session = await directHumeEVI.startInterview(
@@ -403,6 +404,13 @@ export default function EVIInterviewDialog({ isOpen, onClose, job, experienceId,
   };
 
 
+  // Auto-scroll to bottom when transcript changes
+  useEffect(() => {
+    if (transcriptContainerRef.current) {
+      transcriptContainerRef.current.scrollTop = transcriptContainerRef.current.scrollHeight;
+    }
+  }, [transcript]);
+
   const handleCompleteInterview = async () => {
     if (isCompleting) return; // Prevent double submission
     
@@ -483,10 +491,10 @@ export default function EVIInterviewDialog({ isOpen, onClose, job, experienceId,
             sessionId: sessionDataBeforeEnd.sessionId, // Always use the DB session ID
             userId: user?.id || 'guest',
             experienceId: experienceId,
-            jobTitle: job.title,
-            company: job.company,
-            jobDescription: job.description,
-            duration: job.duration,
+            jobTitle: job?.title || 'Combined Interview',
+            company: job?.company || 'All Experiences',
+            jobDescription: job?.description || 'Interview covering all work experiences',
+            duration: job?.duration || '',
             transcript: transcriptToUse,
             emotions: transcriptToUse, // Hume emotions are in the transcript
             totalDurationSeconds: currentTime,
@@ -503,7 +511,9 @@ export default function EVIInterviewDialog({ isOpen, onClose, job, experienceId,
 
         const processedResult = await response.json();
         console.log('✅ Interview processed successfully:', processedResult);
-        
+        console.log('📊 Full response data structure:', JSON.stringify(processedResult, null, 2));
+        console.log('🎯 Achievements data:', processedResult.data?.achievements);
+
         // Store the achievements for display
         setInterviewSummary(processedResult.data);
         
@@ -614,8 +624,8 @@ export default function EVIInterviewDialog({ isOpen, onClose, job, experienceId,
           <Mic className="w-8 h-8 text-primary" />
         </div>
         <div>
-          <h3 className="text-xl font-semibold mb-2">Real-Time AI Interview: {job.title}</h3>
-          <p className="text-muted-foreground">{job.company} • {job.duration}</p>
+          <h3 className="text-xl font-semibold mb-2">Real-Time AI Interview: {job?.title || 'Combined Interview'}</h3>
+          <p className="text-muted-foreground">{job?.company || 'All Experiences'} {job?.duration ? `• ${job.duration}` : ''}</p>
         </div>
       </div>
 
@@ -722,12 +732,12 @@ export default function EVIInterviewDialog({ isOpen, onClose, job, experienceId,
         </div>
       </div>
 
-      <Card className="p-4 max-h-80 overflow-y-auto">
+      <Card className="p-4">
         <h4 className="font-medium mb-3 flex items-center gap-2">
           <FileText className="w-4 h-4" />
           Live Conversation
         </h4>
-        <div className="space-y-3">
+        <div ref={transcriptContainerRef} className="space-y-3 max-h-64 overflow-y-auto">
           {transcript.map((message, index) => (
             <div key={index} className={`text-sm ${
               message.type === 'assistant_message' ? 'text-primary' : 'text-foreground'
@@ -879,7 +889,7 @@ export default function EVIInterviewDialog({ isOpen, onClose, job, experienceId,
 
   return (
     <>
-      <Dialog open={isOpen} onOpenChange={handleClose}>
+      <Dialog open={isOpen} onOpenChange={(open) => { if (!open) handleClose(); }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="sr-only">Real-Time AI Interview</DialogTitle>
@@ -906,7 +916,7 @@ export default function EVIInterviewDialog({ isOpen, onClose, job, experienceId,
               <Clock className="w-4 h-4" />
               <span>Duration: {formatTime(currentTime)}</span>
               <Separator orientation="vertical" className="h-4" />
-              <span>{job.title} at {job.company}</span>
+              <span>{job?.title || 'Combined Interview'} {job?.company ? `at ${job.company}` : ''}</span>
             </div>
             <Separator />
             <div className="space-y-4">

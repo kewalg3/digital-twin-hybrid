@@ -6,6 +6,7 @@ import VoiceRecorder from "@/components/VoiceRecorder";
 import ProfilePhotoUpload from "@/components/ProfilePhotoUpload";
 import ExperienceCard from "@/components/ExperienceCard";
 import WorkStyleInterviewDialog from "@/components/WorkStyleInterviewDialog";
+import EVIInterviewDialog from "@/components/EVIInterviewDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -139,6 +140,10 @@ export default function BetaOnboarding() {
   const [hasExistingData, setHasExistingData] = useState(false);
   const [interviewStatuses, setInterviewStatuses] = useState<Record<string, boolean>>({});
   const [hasCompletedWorkStyleInterview, setHasCompletedWorkStyleInterview] = useState(false);
+  const [isCombinedInterview, setIsCombinedInterview] = useState(false);
+  const [combinedInterviewCompleted, setCombinedInterviewCompleted] = useState(false);
+  const [showEVIInterviewDialog, setShowEVIInterviewDialog] = useState(false);
+  const [selectedExperience, setSelectedExperience] = useState<any>(null);
   
   // Request deduplication to prevent excessive API calls
   const [lastFetchTimes, setLastFetchTimes] = useState<{[key: string]: number}>({});
@@ -1301,14 +1306,16 @@ export default function BetaOnboarding() {
             </div>
             
             <div className="space-y-4">
-              <div className="flex items-center gap-2 mb-6">
-                <FileText className="w-5 h-5" />
-                <h3 className="text-lg font-semibold">Experience Enhancement</h3>
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-2">
+                  <FileText className="w-5 h-5" />
+                  <h3 className="text-lg font-semibold">Experience Enhancement</h3>
+                </div>
               </div>
               
               {/* Manual refresh button for debugging */}
-              <div className="flex gap-2">
-                <Button 
+              <div className="flex justify-between items-center">
+                <Button
                   onClick={async () => {
                     if (user?.id) {
                       console.log('🔄 Manual refresh triggered for user:', user.id);
@@ -1331,6 +1338,32 @@ export default function BetaOnboarding() {
                   ) : (
                     'Refresh Experiences'
                   )}
+                </Button>
+                <Button
+                  onClick={() => {
+                    // Use the existing combined interview dialog
+                    setShowEVIInterviewDialog(true);
+                    setIsCombinedInterview(true);
+                    // Create a combined job object with all experiences
+                    const combinedJob = {
+                      title: 'Combined Interview',
+                      company: 'All Experiences',
+                      duration: '',
+                      location: '',
+                      description: 'Interview covering all work experiences',
+                      skills: [],
+                      software: [],
+                      aiSuggestedSkills: [],
+                      aiSuggestedSoftware: [],
+                      allExperiences: parsedExperiences
+                    };
+                    setSelectedExperience(combinedJob);
+                  }}
+                  className="bg-gradient-primary hover:opacity-90"
+                  size="sm"
+                  disabled={!parsedExperiences || parsedExperiences.length === 0}
+                >
+                  {combinedInterviewCompleted ? 'Take Interview Again' : 'Start Real-Time Interview'}
                 </Button>
               </div>
 
@@ -1390,7 +1423,7 @@ export default function BetaOnboarding() {
                         `${new Date(experience.startDate).getFullYear()} - ${
                           experience.isCurrentRole ? 'Present' : new Date(experience.endDate).getFullYear()
                         }` : 'Duration not specified',
-                      location: experience.location || 'Location not specified',
+                      location: experience.location || 'N/A',
                       description: experience.description || 'No description available',
                       skills: skills || [],
                       software: software || [],
@@ -1449,6 +1482,30 @@ export default function BetaOnboarding() {
                 )}
               </div>
             </div>
+
+            {/* Combined Interview Dialog */}
+            {showEVIInterviewDialog && (
+              <EVIInterviewDialog
+                isOpen={showEVIInterviewDialog}
+                onClose={() => {
+                  setShowEVIInterviewDialog(false);
+                  setIsCombinedInterview(false);
+                  setSelectedExperience(null);
+                }}
+                job={selectedExperience}
+                onInterviewComplete={() => {
+                  setCombinedInterviewCompleted(true);
+                  // Don't close dialog - let user see the insights
+                  // setShowEVIInterviewDialog(false); // Removed to show insights
+                  setIsCombinedInterview(false);
+                  setSelectedExperience(null);
+                  // Refresh all interview statuses
+                  if (user?.id && parsedExperiences.length > 0) {
+                    fetchInterviewStatuses(user.id);
+                  }
+                }}
+              />
+            )}
           </div>
         );
 
@@ -1463,14 +1520,14 @@ export default function BetaOnboarding() {
                 Experience the future of resume processing with AI-powered skills extraction, contextual job analysis, and intelligent career insights.
               </p>
             </div>
-            
+
             <div className="flex justify-center">
               <Card className="p-8 max-w-md w-full text-center space-y-6">
                 <div className="space-y-4">
                   <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto">
                     <Briefcase className="w-8 h-8 text-primary" />
                   </div>
-                  
+
                   <div className="space-y-2">
                     <div className="inline-block bg-muted px-3 py-1 rounded-full text-sm font-medium">
                       Work Style & Career Goals
@@ -1480,11 +1537,11 @@ export default function BetaOnboarding() {
                     </p>
                   </div>
                 </div>
-                
-                <Button 
+
+                <Button
                   onClick={() => setShowWorkStyleDialog(true)}
-                  className={hasCompletedWorkStyleInterview 
-                    ? "w-full bg-transparent border border-emerald-500 text-emerald-700 hover:bg-emerald-50 transition-all duration-200 hover:scale-105" 
+                  className={hasCompletedWorkStyleInterview
+                    ? "w-full bg-transparent border border-emerald-500 text-emerald-700 hover:bg-emerald-50 transition-all duration-200 hover:scale-105"
                     : "w-full bg-gradient-primary hover:opacity-90"}
                   size="lg"
                 >
@@ -1499,8 +1556,8 @@ export default function BetaOnboarding() {
                 </Button>
               </Card>
             </div>
-            
-            <WorkStyleInterviewDialog 
+
+            <WorkStyleInterviewDialog
               isOpen={showWorkStyleDialog}
               onClose={() => setShowWorkStyleDialog(false)}
               onInterviewComplete={() => {

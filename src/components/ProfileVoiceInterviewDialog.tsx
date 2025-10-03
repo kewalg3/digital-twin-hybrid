@@ -45,6 +45,7 @@ export default function ProfileVoiceInterviewDialog({
   const [fullTranscriptFromDB, setFullTranscriptFromDB] = useState<EVIMessage[] | null>(null);
   const interviewTimerRef = useRef<NodeJS.Timeout | null>(null);
   const messageHandlersSetup = useRef<boolean>(false);
+  const transcriptContainerRef = useRef<HTMLDivElement>(null);
   
   // Recruiter context state
   const [recruiterContext, setRecruiterContext] = useState({
@@ -68,15 +69,15 @@ export default function ProfileVoiceInterviewDialog({
     return firstInitial + lastInitial;
   };
 
-  // Cleanup on component unmount
+  // Cleanup on component unmount only
   useEffect(() => {
     return () => {
-      if (directHumeEVI.isConnectedAndReady()) {
-        directHumeEVI.endInterview();
-      }
+      // Final cleanup on unmount
       if (interviewTimerRef.current) {
         clearInterval(interviewTimerRef.current);
+        interviewTimerRef.current = null;
       }
+      messageHandlersSetup.current = false;
     };
   }, []);
 
@@ -186,6 +187,13 @@ export default function ProfileVoiceInterviewDialog({
     }
   };
 
+  // Auto-scroll to bottom when transcript changes
+  useEffect(() => {
+    if (transcriptContainerRef.current) {
+      transcriptContainerRef.current.scrollTop = transcriptContainerRef.current.scrollHeight;
+    }
+  }, [transcript]);
+
   // Timer effect for recording
   useEffect(() => {
     if (isRecording && stage === 'recording') {
@@ -210,57 +218,55 @@ export default function ProfileVoiceInterviewDialog({
   };
 
   const handleStartInterview = async () => {
+    // Prevent multiple simultaneous starts
+    if (isConnecting) {
+      console.log('⚠️ Interview already starting');
+      return;
+    }
+
     setIsConnecting(true);
     setError(null);
-    
+
+    // Clean up any existing connection first
+    if (directHumeEVI.isConnectedAndReady()) {
+      console.log('🧹 Cleaning up existing connection before starting new interview');
+      directHumeEVI.cleanup();
+    }
+
     try {
-      // Create recruiter screening EVI configuration
-      console.log('🎯 Creating recruiter screening configuration...');
+      // Create interview context for profile screening
+      console.log('🎯 Starting profile screening interview...');
       console.log('Candidate data:', candidateData);
       console.log('Recruiter context:', recruiterContext);
-      
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/evi-interview/create-recruiter-config`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          candidateData,
-          recruiterContext
-        })
-      });
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Failed to create interview configuration');
-      }
+      // Use startInterview method (creates new config each time)
+      const profileContext = {
+        title: 'Profile Screening',
+        company: candidateData?.company || 'Company',
+        duration: '',
+        location: candidateData?.location || '',
+        description: `Profile screening for ${candidateName}`,
+        skills: candidateData?.skills || [],
+        software: candidateData?.software || [],
+        experienceId: `profile-screening-${Date.now()}`, // Unique ID for each screening
+        candidateData,
+        recruiterContext
+      };
 
-      const { configId, sessionId: newSessionId, interviewId } = await response.json();
-      console.log('✅ Recruiter config created:', { configId, sessionId: newSessionId, interviewId });
-      setSessionId(newSessionId);
+      console.log('🚀 Starting profile interview with context:', profileContext);
 
-      // Get access token for direct Hume connection
-      console.log('🔑 Getting access token...');
-      const tokenResponse = await fetch(`${import.meta.env.VITE_API_URL}/evi-interview/get-token`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId: newSessionId })
-      });
+      // Use the standard startInterview method (creates new config each time)
+      const session = await directHumeEVI.startInterview(
+        candidateId, // Use candidateId as userId for this interview
+        'profile_screening' as any, // Add profile_screening as interview type
+        profileContext
+      );
 
-      if (!tokenResponse.ok) {
-        const tokenError = await tokenResponse.json();
-        throw new Error(tokenError.error || 'Failed to get access token');
-      }
+      setSessionId(session.sessionId);
 
-      const { accessToken } = await tokenResponse.json();
-      console.log('✅ Access token obtained');
-
-      // Connect to Hume using the existing config
-      console.log('📡 Connecting to Hume with existing config...');
-      
-      // Set up message handlers BEFORE connecting
+      // Set up message handlers AFTER successful connection
       setupDirectEVIMessageHandlers();
-      
-      await directHumeEVI.connectToExistingConfig(configId, accessToken, newSessionId);
-      
+
       // Recording will be started automatically in the 'connected' event handler
       
       setStage('recording');
@@ -344,11 +350,33 @@ export default function ProfileVoiceInterviewDialog({
   };
 
   const handleClose = async () => {
+    // Stop recording if active
+    if (isRecording) {
+      try {
+        directHumeEVI.stopRecording();
+      } catch (e) {
+        console.error('Error stopping recording:', e);
+      }
+    }
+
     // End interview if still active
     if (directHumeEVI.isConnectedAndReady()) {
-      await directHumeEVI.endInterview();
+      try {
+        await directHumeEVI.endInterview();
+      } catch (e) {
+        console.error('Error ending interview:', e);
+      }
     }
-    
+
+    // Clear any timers
+    if (interviewTimerRef.current) {
+      clearInterval(interviewTimerRef.current);
+      interviewTimerRef.current = null;
+    }
+
+    // Clean up directHumeEVI completely when closing
+    directHumeEVI.cleanup();
+
     // Reset all state
     setStage('initial');
     setIsRecording(false);
@@ -370,6 +398,10 @@ export default function ProfileVoiceInterviewDialog({
     setCompletedSessionId(null);
     setFullTranscriptFromDB(null);
     setIsListening(false);
+
+    // Reset message handlers flag
+    messageHandlersSetup.current = false;
+
     onClose();
   };
 
@@ -603,12 +635,12 @@ export default function ProfileVoiceInterviewDialog({
         </Card>
       )}
 
-      <Card className="p-4 max-h-80 overflow-y-auto bg-muted/30">
-        <h4 className="font-medium mb-3 flex items-center gap-2 sticky top-0 bg-background/80 backdrop-blur-sm pb-2">
+      <Card className="p-4 bg-muted/30">
+        <h4 className="font-medium mb-3 flex items-center gap-2">
           <FileText className="w-4 h-4" />
           Live Conversation
         </h4>
-        <div className="space-y-4">
+        <div ref={transcriptContainerRef} className="space-y-4 max-h-64 overflow-y-auto">
           {transcript.map((message, index) => (
             <div key={index} className={`flex gap-3 ${
               message.type === 'assistant_message' ? 'justify-start' : 'justify-end'

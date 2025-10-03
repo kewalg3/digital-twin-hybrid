@@ -55,7 +55,28 @@ class EVIInterviewService {
         selectedVoice
       } = sessionData;
 
-      // Step 1: Convert and upload audio to Supabase
+      // Step 1: First check if session exists and get its details
+      console.log('🔄 Looking for existing session:', sessionId);
+      const existingSession = await prisma.eVIInterviewSession.findUnique({
+        where: { id: sessionId }
+      });
+
+      console.log('🔍 Found existing session:', existingSession ? 'YES' : 'NO');
+      if (existingSession) {
+        console.log('🔍 Existing session details:', {
+          id: existingSession.id,
+          experienceId: existingSession.experienceId,
+          interviewType: existingSession.interviewType,
+          sessionEndTime: existingSession.sessionEndTime,
+          humeSessionId: existingSession.humeSessionId
+        });
+      }
+
+      if (!existingSession) {
+        throw new Error(`Session ${sessionId} not found in database`);
+      }
+
+      // Step 2: Convert and upload audio to Supabase
       let audioFileUrl = null;
       if (audioBlob) {
         try {
@@ -67,10 +88,11 @@ class EVIInterviewService {
         }
       }
 
-      // Step 2: Extract insights based on interview type
-      const interviewType = sessionData.interviewType || 'job_experience';
+      // Step 3: Extract insights based on interview type (use session's type as fallback)
+      const interviewType = sessionData.interviewType || existingSession.interviewType || 'job_experience';
+      console.log('📋 Interview type determined:', interviewType);
       let achievements;
-      
+
       if (interviewType === 'work_style') {
         achievements = await this.extractWorkStyleInsights({
           transcript
@@ -86,32 +108,9 @@ class EVIInterviewService {
         });
       }
 
-      // Step 3: Generate interview brief
+      // Step 4: Generate interview brief
       const interviewBrief = await this.generateInterviewBrief(transcript, interviewType);
       console.log('📄 Generated interview brief:', interviewBrief.wordCount, 'words');
-
-      // Step 4: Update existing session with completion data
-      console.log('🔄 Updating existing session:', sessionId);
-      console.log('🔍 IMPORTANT: Looking for session with ID:', sessionId);
-      
-      // First check if session exists
-      const existingSession = await prisma.eVIInterviewSession.findUnique({
-        where: { id: sessionId }
-      });
-      
-      console.log('🔍 Found existing session:', existingSession ? 'YES' : 'NO');
-      if (existingSession) {
-        console.log('🔍 Existing session details:', {
-          id: existingSession.id,
-          experienceId: existingSession.experienceId,
-          sessionEndTime: existingSession.sessionEndTime,
-          humeSessionId: existingSession.humeSessionId
-        });
-      }
-      
-      if (!existingSession) {
-        throw new Error(`Session ${sessionId} not found in database`);
-      }
       
       // Update the existing session with completion data
       const session = await prisma.eVIInterviewSession.update({
@@ -211,14 +210,17 @@ If no clear achievements were mentioned in the interview, return {"achievements"
       });
 
       const aiResponse = response.choices[0].message.content.trim();
-      console.log('🤖 OpenAI response:', aiResponse);
-      
+      console.log('🤖 OpenAI raw response:', aiResponse);
+
       // Parse JSON response
       let achievements;
       try {
         achievements = JSON.parse(aiResponse);
+        console.log('✅ Successfully parsed achievements:', JSON.stringify(achievements, null, 2));
+        console.log('📊 Achievement count:', achievements.achievements ? achievements.achievements.length : 0);
       } catch (parseError) {
-        console.warn('⚠️ Failed to parse OpenAI JSON, creating fallback structure');
+        console.error('⚠️ Failed to parse OpenAI JSON:', parseError);
+        console.log('Raw response that failed to parse:', aiResponse);
         // Fallback: return empty achievements
         achievements = {
           achievements: [],

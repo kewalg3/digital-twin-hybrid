@@ -43,6 +43,7 @@ export default function WorkStyleInterviewDialog({ isOpen, onClose, onInterviewC
   const messageHandlersSetup = useRef<boolean>(false);
   const timeoutWarningShown = useRef<boolean>(false);
   const autoCompletionTriggered = useRef<boolean>(false);
+  const transcriptContainerRef = useRef<HTMLDivElement>(null);
   
   // Timeout constants
   const MAX_INTERVIEW_DURATION = 300; // 5 minutes in seconds
@@ -51,9 +52,13 @@ export default function WorkStyleInterviewDialog({ isOpen, onClose, onInterviewC
   // Cleanup on component unmount
   useEffect(() => {
     return () => {
-      cleanup();
+      // Only cleanup timer on unmount, not the whole directHumeEVI
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
     };
-  }, [isOpen]);
+  }, []);
 
   const cleanup = () => {
     console.log('🧹 Cleaning up Work Style interview component');
@@ -64,9 +69,19 @@ export default function WorkStyleInterviewDialog({ isOpen, onClose, onInterviewC
     messageHandlersSetup.current = false;
     timeoutWarningShown.current = false;
     autoCompletionTriggered.current = false;
-    // Clean up the directHumeEVI singleton to remove any existing handlers
-    directHumeEVI.cleanup();
+    // Only cleanup directHumeEVI when dialog is actually closing
+    // Not on every isOpen change which could clear active handlers
+    if (!isOpen) {
+      directHumeEVI.cleanup();
+    }
   };
+
+  // Auto-scroll to bottom when transcript changes
+  useEffect(() => {
+    if (transcriptContainerRef.current) {
+      transcriptContainerRef.current.scrollTop = transcriptContainerRef.current.scrollHeight;
+    }
+  }, [transcript]);
 
   // Timer effect - for display only, let Hume handle the actual timeout
   useEffect(() => {
@@ -302,9 +317,9 @@ export default function WorkStyleInterviewDialog({ isOpen, onClose, onInterviewC
         'work_style',
         {
           title: 'Work Style Assessment',
-          company: 'Career Goals Discussion',
+          company: 'Work Style Discussion',
           duration: '',
-          description: 'Understanding work preferences and career aspirations',
+          description: 'Understanding work preferences and collaboration style',
           skills: [],
           software: [],
           experienceId: 'work-style-interview' // Special ID for work style interviews
@@ -403,8 +418,8 @@ export default function WorkStyleInterviewDialog({ isOpen, onClose, onInterviewC
             userId: user?.id || 'guest',
             experienceId: 'work-style-interview', // Special ID for work style interviews
             jobTitle: 'Work Style Assessment',
-            company: 'Career Goals Discussion',
-            jobDescription: 'Understanding work preferences and career aspirations',
+            company: 'Work Style Discussion',
+            jobDescription: 'Understanding work preferences and collaboration style',
             duration: 'N/A',
             transcript: finalTranscript,
             emotions: finalTranscript,
@@ -483,6 +498,8 @@ export default function WorkStyleInterviewDialog({ isOpen, onClose, onInterviewC
   };
 
   const handleClose = () => {
+    // Clean up directHumeEVI completely when closing
+    directHumeEVI.cleanup();
     cleanup();
     setStage('initial');
     setIsRecording(false);
@@ -505,9 +522,9 @@ export default function WorkStyleInterviewDialog({ isOpen, onClose, onInterviewC
         <div className="inline-flex p-3 bg-primary/10 rounded-full">
           <Target className="h-8 w-8 text-primary" />
         </div>
-        <h3 className="text-lg font-semibold">Work Style & Career Goals Interview</h3>
+        <h3 className="text-lg font-semibold">Work Style Interview</h3>
         <p className="text-sm text-muted-foreground max-w-md mx-auto">
-          Let's have a conversation about your work preferences, collaboration style, and career aspirations. This helps us understand what environment you thrive in.
+          Let's have a conversation about your work preferences and collaboration style. This helps us understand what environment you thrive in.
         </p>
       </div>
 
@@ -525,10 +542,6 @@ export default function WorkStyleInterviewDialog({ isOpen, onClose, onInterviewC
           <li className="flex items-start gap-2">
             <span className="text-primary">•</span>
             <span>Your approach to challenges and pressure</span>
-          </li>
-          <li className="flex items-start gap-2">
-            <span className="text-primary">•</span>
-            <span>Your career goals and aspirations</span>
           </li>
         </ul>
       </Card>
@@ -646,12 +659,12 @@ export default function WorkStyleInterviewDialog({ isOpen, onClose, onInterviewC
         </div>
       </div>
 
-      <Card className="p-4 max-h-80 overflow-y-auto">
+      <Card className="p-4">
         <h4 className="font-medium mb-3 flex items-center gap-2">
           <FileText className="w-4 h-4" />
           Live Conversation
         </h4>
-        <div className="space-y-3">
+        <div ref={transcriptContainerRef} className="space-y-3 max-h-64 overflow-y-auto">
           {transcript.map((message, index) => (
             <div key={index} className={`text-sm ${
               message.type === 'assistant_message' ? 'text-primary' : 'text-foreground'
@@ -773,25 +786,6 @@ export default function WorkStyleInterviewDialog({ isOpen, onClose, onInterviewC
           )}
         </Card>
 
-        {/* Career Goals if available */}
-        {interviewSummary?.achievements?.careerGoals && (
-          <Card className="p-4">
-            <div className="flex items-center gap-2 mb-3">
-              <Target className="w-4 h-4 text-primary" />
-              <h4 className="font-medium">Career Goals</h4>
-            </div>
-            <div className="space-y-2 text-sm">
-              <div>
-                <span className="font-medium">Short Term:</span>
-                <p className="text-muted-foreground">{interviewSummary.achievements.careerGoals.shortTerm}</p>
-              </div>
-              <div>
-                <span className="font-medium">Long Term:</span>
-                <p className="text-muted-foreground">{interviewSummary.achievements.careerGoals.longTerm}</p>
-              </div>
-            </div>
-          </Card>
-        )}
 
         {/* Interview Summary */}
         <Card className="p-4">
@@ -875,9 +869,9 @@ export default function WorkStyleInterviewDialog({ isOpen, onClose, onInterviewC
       <Dialog open={isOpen} onOpenChange={handleClose}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Work Style & Career Goals</DialogTitle>
+            <DialogTitle>Work Style</DialogTitle>
             <DialogDescription>
-              Let's understand your work preferences and career aspirations
+              Let's understand your work preferences and collaboration style
             </DialogDescription>
           </DialogHeader>
           
@@ -898,7 +892,7 @@ export default function WorkStyleInterviewDialog({ isOpen, onClose, onInterviewC
                 <span>Duration: {formatTime(currentTime)}</span>
               </div>
               <Separator orientation="vertical" className="h-4" />
-              <span>Work Style & Career Goals Assessment</span>
+              <span>Work Style Assessment</span>
             </div>
             <Separator />
             <div className="space-y-4">

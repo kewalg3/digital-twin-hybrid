@@ -169,21 +169,24 @@ router.post('/', async (req, res) => {
       });
     }
 
+    // Create experience data object
+    const experienceData = {
+      userId,
+      jobTitle,
+      company,
+      location,
+      employmentType,
+      startDate: new Date(startDate),
+      endDate: endDate ? new Date(endDate) : null,
+      isCurrentRole: isCurrentRole || false,
+      description: description || '',
+      achievements: achievements || [],
+      keySkills: keySkills || [],
+      source
+    };
+
     const experience = await prisma.experience.create({
-      data: {
-        userId,
-        jobTitle,
-        company,
-        location,
-        employmentType,
-        startDate: new Date(startDate),
-        endDate: endDate ? new Date(endDate) : null,
-        isCurrentRole: isCurrentRole || false,
-        description: description || '',
-        achievements: achievements || [],
-        keySkills: keySkills || [],
-        source
-      }
+      data: experienceData
     });
 
     res.status(201).json({ 

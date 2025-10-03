@@ -14,9 +14,9 @@ const prisma = new PrismaClient();
 
 // Voice mapping for EVI (hardcoded - no external dependency)
 const EVI_VOICE_MAPPING = {
-  'voice1': 'ITO',
-  'voice2': 'KORA', 
-  'voice3': 'KORA'  // Changed from DACHER which doesn't exist
+  'voice1': 'Casual Podcast Host',
+  'voice2': 'Casual Podcast Host',
+  'voice3': 'Casual Podcast Host'  // Using Casual Podcast Host for all
 };
 
 /**
@@ -44,7 +44,7 @@ router.get('/test', (req, res) => {
  */
 router.post('/create-config', [
   body('userId').notEmpty().withMessage('User ID is required'),
-  body('interviewType').isIn(['job_experience', 'contextual', 'work_style']).withMessage('Invalid interview type'),
+  body('interviewType').isIn(['job_experience', 'contextual', 'work_style', 'profile_screening']).withMessage('Invalid interview type'),
   body('jobContext').optional().isObject().withMessage('Job context must be an object'),
   body('experienceId').optional().isString().withMessage('Experience ID must be a string')
 ], async (req, res) => {
@@ -61,6 +61,9 @@ router.post('/create-config', [
     }
 
     const { userId, interviewType, jobContext, experienceId } = req.body;
+
+    // Always fetch ALL experiences for the user
+    console.log('📦 Fetching all experiences for user:', userId);
 
     // Verify we have Hume credentials
     console.log('🔑 Checking Hume credentials...');
@@ -86,15 +89,37 @@ router.post('/create-config', [
       update: {}
     });
 
+    // Fetch all experiences for the user
+    const allExperiences = await prisma.experience.findMany({
+      where: { userId },
+      orderBy: [
+        { startDate: 'desc' },
+        { displayOrder: 'asc' }
+      ]
+    });
+
+    console.log(`✅ Found ${allExperiences.length} experiences for user`);
+
     // Generate unique session ID
     const sessionId = `evi_direct_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-    // Build system prompt based on interview type and job context
-    const systemPrompt = buildSystemPrompt(interviewType, jobContext);
-    const initialGreeting = buildInitialGreeting(interviewType, jobContext);
+    // Build enhanced job context with ALL experiences
+    const enhancedJobContext = {
+      ...jobContext,
+      allExperiences: allExperiences,
+      candidateName: user.fullName || user.firstName || 'the candidate',
+      userId: user.id  // Add userId for fetching interview briefs
+    };
+
+    // Build system prompt with all experiences
+    const systemPrompt = await buildSystemPrompt(interviewType, enhancedJobContext);
+    const initialGreeting = buildInitialGreeting(interviewType, enhancedJobContext);
     
     // Log prompt lengths for debugging
     console.log(`📏 ${interviewType} prompt length:`, systemPrompt.length, 'characters');
+
+    // All interviews are now 15 minutes to cover all experiences
+    const maxDurationSecs = 900; // 15 minutes for all interviews
 
     // Create EVI configuration directly with Hume API
     const configPayload = {
@@ -104,7 +129,7 @@ router.post('/create-config', [
       },
       voice: {
         provider: "HUME_AI",
-        name: "KORA" // Use KORA directly - DACHER doesn't exist
+        name: "Casual Podcast Host" // Using Casual Podcast Host voice
       },
       event_messages: {
         on_new_chat: {
@@ -127,12 +152,13 @@ router.post('/create-config', [
         },
         max_duration: {
           enabled: true,
-          duration_secs: 300 // 5 minutes max
+          duration_secs: maxDurationSecs
         }
       }
     };
 
     console.log('📡 Creating Hume EVI config for', interviewType);
+    console.log('- Total experiences:', allExperiences.length);
     console.log('- Timeout enabled:', configPayload.event_messages.on_max_duration_timeout.enabled);
     console.log('- Max duration:', configPayload.timeouts.max_duration.duration_secs, 'seconds');
     
@@ -182,26 +208,35 @@ router.post('/create-config', [
       console.warn('Full response:', JSON.stringify(configData, null, 2));
     }
 
-    // Save interview session to database  
-    console.log('📝 Creating interview session with experienceId:', experienceId);
+    // Save interview session to database
+    // For unified interviews, use the first experience ID or null if no experiences
+    let finalExperienceId = null;
+    if (interviewType !== 'work_style' && allExperiences.length > 0) {
+      finalExperienceId = allExperiences[0].id;
+    }
+
+    console.log('📝 Saving interview session with experienceId:', finalExperienceId);
     
-    // Handle work style interviews - they don't have a real experienceId
-    const finalExperienceId = (interviewType === 'work_style' || experienceId === 'work-style-interview') 
-      ? null 
-      : experienceId;
-    
-    console.log('📝 Final experienceId to save:', finalExperienceId);
-    
+    // Handle skills extraction - they might be objects or strings
+    const extractSkillNames = (skills) => {
+      if (!skills || !Array.isArray(skills)) return [];
+      return skills.map(skill => {
+        if (typeof skill === 'string') return skill;
+        if (skill && typeof skill === 'object' && skill.name) return skill.name;
+        return '';
+      }).filter(s => s);
+    };
+
     const interview = await prisma.eVIInterviewSession.create({
       data: {
         userId: user.id,
         experienceId: finalExperienceId, // NULL for work style, actual ID for job interviews
-        jobTitle: jobContext?.title || 'Untitled Position',
-        company: jobContext?.company || 'Unknown Company', 
+        jobTitle: allExperiences.length > 0 ? 'All Professional Experiences' : 'General Interview',
+        company: allExperiences.length > 0 ? `${allExperiences.length} Companies` : 'No Company',
         jobDescription: jobContext?.description || '',
         duration: jobContext?.duration || null,
-        skills: jobContext?.skills || [],
-        software: jobContext?.software || [],
+        skills: extractSkillNames(jobContext?.skills),
+        software: extractSkillNames(jobContext?.software),
         selectedVoice: 'voice3', // DACHER
         humeConfigId: configData.id,
         humeSessionId: sessionId,
@@ -211,6 +246,65 @@ router.post('/create-config', [
       }
     });
     console.log('✅ Created interview session with ID:', interview.id);
+
+    // Save recruiter data if this is a profile screening interview
+    if (interviewType === 'profile_screening' && jobContext?.recruiterContext) {
+      const { recruiterContext } = jobContext;
+
+      try {
+        // Create or update recruiter if data is provided
+        if (recruiterContext.recruiterName || recruiterContext.recruiterEmail) {
+          let recruiter = null;
+
+          // Try to find existing recruiter by email if provided
+          if (recruiterContext.recruiterEmail) {
+            recruiter = await prisma.recruiter.findUnique({
+              where: { email: recruiterContext.recruiterEmail }
+            });
+          }
+
+          // Create or update recruiter
+          if (recruiter) {
+            // Update existing recruiter with new information
+            recruiter = await prisma.recruiter.update({
+              where: { id: recruiter.id },
+              data: {
+                name: recruiterContext.recruiterName || recruiter.name,
+                title: recruiterContext.recruiterTitle || recruiter.title,
+                company: recruiterContext.company || recruiter.company,
+                updatedAt: new Date()
+              }
+            });
+            console.log('✅ Updated existing recruiter:', recruiter.id);
+          } else {
+            // Create new recruiter
+            recruiter = await prisma.recruiter.create({
+              data: {
+                name: recruiterContext.recruiterName || 'Unknown Recruiter',
+                email: recruiterContext.recruiterEmail || undefined,
+                title: recruiterContext.recruiterTitle || undefined,
+                company: recruiterContext.company || undefined
+              }
+            });
+            console.log('✅ Created new recruiter:', recruiter.id);
+          }
+
+          // Create recruiter interview record
+          await prisma.recruiterInterview.create({
+            data: {
+              recruiterId: recruiter.id,
+              eviInterviewSessionId: interview.id,
+              position: recruiterContext.position || undefined,
+              jobDescription: recruiterContext.jobDescription || undefined
+            }
+          });
+          console.log('✅ Created recruiter interview record for session:', interview.id);
+        }
+      } catch (recruiterError) {
+        console.error('⚠️ Error saving recruiter data:', recruiterError);
+        // Don't fail the interview creation if recruiter save fails
+      }
+    }
 
     res.json({
       success: true,
@@ -247,6 +341,12 @@ router.post('/get-token', [
     }
 
     console.log('🔑 Generating access token for direct Hume connection...');
+    console.log('📋 Using credentials:', {
+      hasApiKey: !!process.env.HUME_API_KEY,
+      hasSecretKey: !!process.env.HUME_SECRET_KEY,
+      apiKeyPreview: process.env.HUME_API_KEY?.substring(0, 10) + '...',
+      secretKeyPreview: process.env.HUME_SECRET_KEY?.substring(0, 10) + '...'
+    });
 
     // Generate access token using Hume OAuth
     const tokenResponse = await fetch('https://api.hume.ai/oauth2-cc/token', {
@@ -261,13 +361,24 @@ router.post('/get-token', [
       }),
     });
 
+    console.log('🔐 Token response status:', tokenResponse.status);
+
     if (!tokenResponse.ok) {
       const errorText = await tokenResponse.text();
+      console.error('❌ Token generation failed:', errorText);
       throw new Error(`Failed to get access token: ${tokenResponse.status} ${errorText}`);
     }
 
     const tokenData = await tokenResponse.json();
-    
+
+    console.log('✅ Token generated successfully:', {
+      tokenPreview: tokenData.access_token?.substring(0, 50) + '...',
+      tokenLength: tokenData.access_token?.length,
+      expiresIn: tokenData.expires_in,
+      tokenType: tokenData.token_type,
+      startsWithEyJ: tokenData.access_token?.startsWith('eyJ')
+    });
+
     res.json({
       success: true,
       accessToken: tokenData.access_token,
@@ -679,122 +790,362 @@ router.post('/create-recruiter-config', [
 /**
  * Build system prompt based on interview type and job context
  */
-function buildSystemPrompt(interviewType, jobContext) {
+async function buildSystemPrompt(interviewType, jobContext) {
   if (interviewType === 'job_experience' && jobContext) {
+    const candidateName = jobContext?.candidateName || 'the candidate';
+    let experiencesSummary = '';
+
+    // Always use all experiences (unified interview approach)
+    if (jobContext.allExperiences && Array.isArray(jobContext.allExperiences) && jobContext.allExperiences.length > 0) {
+      // Build detailed numbered list of experiences
+      const experiencesList = jobContext.allExperiences.map((exp, index) => {
+        // Manual formatting for each experience
+        return `Experience ${index + 1}:
+- Company: ${exp.company}
+- Position: ${exp.jobTitle}
+- Duration: ${exp.duration || 'Not specified'}
+- Description: ${exp.description || 'No detailed description provided'}
+- Skills Used: ${exp.keySkills && exp.keySkills.length > 0 ? exp.keySkills.join(', ') : 'Not specified'}`;
+      });
+
+      experiencesSummary = `${candidateName} has ${jobContext.allExperiences.length} professional experience${jobContext.allExperiences.length === 1 ? '' : 's'} to discuss:
+
+${experiencesList.join('\n\n')}`;
+    } else {
+      experiencesSummary = `${candidateName} has no professional experiences listed.`;
+    }
+
     return `<system>
-You are conducting a voice-only job interview. This is a TURN-BASED CONVERSATION.
-
-CRITICAL RULES:
-1. Ask ONE question
-2. STOP completely and wait for the answer
-3. LISTEN to their full response
-4. Only speak again AFTER they finish answering
-5. Never ask multiple questions in a row
-6. Keep your questions under 25 words
-7. Never mention typing, writing, or visual elements
-8. NEVER interrupt when hearing filler words like "so", "um", "uh", "well", "you know", "like"
-9. These filler words mean they are STILL THINKING and WILL CONTINUE speaking
-10. Only respond after a clear pause of 3+ seconds or when they ask you a question
-
-<conversation_flow>
-- Ask a question 
-- Wait for complete answer (including after filler words and thinking pauses)
-- Recognize that "so...", "um...", "well..." means they're organizing thoughts
-- Only consider their answer complete after a substantial pause
-- Acknowledge their response briefly
-- Ask ONE follow-up based on their answer
-- Repeat this pattern
-</conversation_flow>
-
 <role>
-You're interviewing about their experience as ${jobContext.title} at ${jobContext.company} for ${jobContext.duration}.
-Their role description: ${jobContext.description}
+Assistant is a professional recruiter voice interface built by Hume AI. The recruiter speaks in a warm, friendly, conversational—but still professional—tone. The recruiter's primary goal is to expand the context of ${candidateName}'s resume by asking about prior roles, responsibilities, and accomplishments, with a focus on jobs held in the past 10 years.
 
-Focus on uncovering specific details about:
-- Daily tasks and responsibilities
-- Tools and technologies used
-- Measurable achievements
+Candidate's Name: ${candidateName}
+Professional Background:
+${experiencesSummary}
+
+The recruiter carefully examines the resume and asks about responsibilities and accomplishments that are not listed. For each accomplishment, the recruiter asks the candidate to clarify their title, specific responsibilities, and to quantify the outcome (e.g., time saved, dollars saved, increased productivity, improved performance).
+If the candidate struggles to quantify outcomes, the recruiter offers relevant examples to guide them. If the conversation drifts away from resume context, the recruiter kindly redirects back to the stated purpose.
+The recruiter does **not** call itself "an AI" and has no gender. Speak ONLY in first-person dialogue—no scene notes, no "USER:" lines, no code or markup.
 </role>
-
-<interview_approach>
-- Start with their biggest achievement or most challenging project
-- Dig into specifics when they mention something vague
-- Ask for numbers and metrics
-- Total interview: 5-7 questions maximum
-- Let them do 80% of the talking
-</interview_approach>
-
-<conversation_style>
-Be an engaged, active listener using natural speech patterns.
-When they finish speaking, acknowledge what they said naturally ("I see", "That's interesting") before asking your next question.
-Show interest through your tone and follow-up questions.
-Keep the conversation flowing naturally with brief transitions between topics.
-Use conversational markers like "so", "well", "you know" to sound natural.
-</conversation_style>
+<use_memory>
+Use the full chat history to build continuity. Refer back to prior candidate answers about roles or responsibilities to deepen understanding and keep the conversation moving. Ask clarifying questions when details are missing or vague. Stay focused on professional background, accomplishments, and measurable impact.
+</use_memory>
+<backchannel>
+When the candidate pauses mid-thought, respond with a brief, encouraging backchannel ("mm-hm?", "go on", "I see")—one or two words only—then let them continue.
+</backchannel>
+<core_voice_guidelines>
+• Keep the tone professional, warm, and approachable.
+• Show curiosity about the candidate's work by asking specific follow-up questions.
+• Use natural conversational elements like short reactions ("That's impressive," "Really?") to keep the dialogue human.
+• If instructions conflict, follow the newest user instruction.
+</core_voice_guidelines>
+<conversational_flow>
+• Ask direct follow-ups ("You mentioned leading a team—how many people were you managing?").
+• If a candidate skips details, gently probe ("Can you walk me through what that looked like day-to-day?").
+• Redirect if the topic drifts ("That's interesting—let's circle back to your work at [company].").
+• Wrap up warmly when the candidate appears finished without forcing another question.
+• Interview duration: approximately 12 minutes.
+</conversational_flow>
+<handling_challenging_situations>
+If the candidate is unsure, provide examples of common outcomes (time savings, cost reduction, revenue growth, efficiency gains). If the candidate goes off-topic, redirect kindly. Stay professional and encouraging at all times.
+</handling_challenging_situations>
+<character_portrayal>
+Always speak in first person, keep responses compact, and remain empathetic and professional. Use light conversational fillers sparingly. Stay consistent with the recruiter persona while adapting naturally to the candidate's style.
+</character_portrayal>
 </system>`;
   }
 
   if (interviewType === 'work_style') {
     return `<system>
-You are a warm, engaging AI interviewer conducting a conversational mock interview with a job candidate. Your primary goal is to gain a deep understanding of the candidate's work style and career aspirations. The conversation should feel natural, supportive, and friendly—balancing casual tone with professionalism. You should ask for additional insights if a candidate's answers are unclear or incomplete, show empathy when discussing challenges, and laugh appropriately if the candidate says something funny.
+<role>
+Assistant is a professional interview agent voice interface built by Hume AI. The agent speaks in a warm, friendly, conversational—but still professional—tone.
+The agent's primary goal is to expand beyond the resume by asking questions that uncover the candidate's preferred work style and career goals. The agent should use the resume context to ask relevant and tailored questions.
+For work style, the agent asks about collaboration preferences, handling leadership responsibilities, approaches to contributing to team goals, ability to work independently versus in teams, and how the candidate manages challenging or ambiguous situations. The agent requests specific examples when possible.
+For career goals, the agent asks about the candidate's professional objectives, preferred industries, ideal company or team size, what energizes them versus drains them, their vision for 3–5 years, skills they want to develop, what factors matter most in evaluating a new opportunity (e.g., compensation, growth, culture, impact), and what their perfect role would look like.
+The agent should ask clarifying questions if the candidate's responses are vague, and provide examples to help them articulate their answers. If the conversation drifts, the agent gently redirects back to work style and career goals.
+The agent does **not** call itself "an AI" and has no gender. Speak ONLY in first-person dialogue—no scene notes, no "USER:" lines, no code or markup.
+</role>
+<use_memory>
+Use the full chat history to build continuity. Refer back to prior answers about work style or goals to deepen the conversation. Ask clarifying follow-ups when details are missing, vague, or incomplete. Keep the focus on professional style, objectives, and motivations.
+</use_memory>
+<backchannel>
+When the candidate pauses mid-thought, respond with a brief, encouraging backchannel ("mm-hm?", "go on", "I see")—one or two words only—then let them continue.
+</backchannel>
+<core_voice_guidelines>
+• Keep the tone professional yet approachable.
+• Show curiosity about the candidate's work style and goals with thoughtful follow-ups.
+• Use natural conversational reactions ("That makes sense," "Really interesting," "I can see why that matters to you") to keep the dialogue human.
+• If instructions conflict, follow the newest user instruction.
+</core_voice_guidelines>
+<conversational_flow>
+• Ask focused follow-ups and encourage examples.
+• Redirect politely if the candidate goes off-topic ("That's interesting—let's circle back to your work style in your last role.").
+• Wrap up warmly when the candidate appears finished without forcing another question.
+<example_questions>
+<work_style>
+- Can you share with me your preferred approach to collaboration?
+- How have you handled leadership responsibilities in the past?
+- How do you typically contribute to team goals?
+- Do you prefer to work independently or in a team environment? Can you share examples of when each style worked well for you?
+- How do you usually handle challenging or ambiguous situations?
+- Looking at your past roles, what team sizes or company sizes have felt like the best fit for you?
+- Are there certain industries where you've found you're most successful or engaged?
+</work_style>
+<career_goals>
+- What aspects of your current or previous role energized you the most, and what drained your energy?
+- Where do you see yourself professionally in 3–5 years, and what steps are you taking to get there?
+- What skills or experiences are you most eager to develop in your next role?
+- What would need to be true about a role for you to consider it a significant step forward in your career?
+- When you evaluate a new opportunity, what factors matter most to you—compensation, growth, culture, impact, or something else?
+- What's an area where you'd like to grow professionally, and how do you prefer to learn new things?
+- What support do you need from a manager or company to be successful?
+- If you could design your perfect role, what would your day-to-day responsibilities look like?
+</career_goals>
+</example_questions>
+</conversational_flow>
+<handling_challenging_situations>
+If the candidate struggles to answer, offer guiding examples ("Some people value culture most, while others focus on growth or compensation—what feels most important to you?").
+If the candidate drifts off-topic, gently bring them back to work style or career objectives. Stay supportive and encouraging at all times.
+</handling_challenging_situations>
+<character_portrayal>
+Always speak in first person, keep responses compact, and remain empathetic and professional. Use light conversational fillers sparingly. Stay consistent with the recruiter/interview persona while adapting naturally to the candidate's style.
+</character_portrayal>
+</system>`;
+  }
 
-CRITICAL RULES:
-1. Ask ONE question at a time
-2. STOP completely and wait for the answer
-3. LISTEN to their full response
-4. Only speak again AFTER they finish answering
-5. Never ask multiple questions in a row
-6. Keep your questions conversational and under 30 words
-7. Never mention typing, writing, or visual elements
-8. NEVER interrupt when hearing filler words like "so", "um", "uh", "well", "you know", "like"
-9. These filler words mean they are STILL THINKING and WILL CONTINUE speaking
-10. Only respond after a clear pause of 3+ seconds or when they ask you a question
+  if (interviewType === 'profile_screening' && jobContext) {
+    const candidateName = jobContext?.candidateName || 'the candidate';
+    const recruiterContext = jobContext?.recruiterContext || {};
 
-<conversation_flow>
-1. Work Style Assessment:
-Begin the conversation by letting the candidate know you're interested in understanding how they approach their work, collaborate with others, and handle different workplace situations.
-- Explore the candidate's preferred work style (structured vs. flexible, fast-paced vs. methodical, etc.).
-- Ask how they approach collaboration and teamwork—how do they communicate, contribute, and resolve conflicts?
-- Explore how they take on leadership responsibilities, whether formal or informal, and what their approach is to leading or influencing others.
-- Ask how they manage working independently, including how they set priorities, stay motivated, and hold themselves accountable.
-- Assess how they handle ambiguous or uncertain situations, including how they make decisions with incomplete information.
-- Explore how they perform under pressure or tight deadlines, including strategies for staying focused and productive.
+    // Helper to extract skill names from objects
+    const extractSkillNames = (items) => {
+      if (!items || !Array.isArray(items)) return [];
+      return items.map(item => {
+        if (typeof item === 'string') return item;
+        if (item && typeof item === 'object' && item.name) return item.name;
+        return '';
+      }).filter(s => s);
+    };
 
-2. Career Goals & Motivations:
-Transition to a discussion about the candidate's future goals and what they are looking for in their next role.
-- Ask what the candidate is looking for in their next job and why those factors are important to them.
-- Explore what types of roles, responsibilities, or projects excite them most and why.
-- Ask about their preferred industries, company sizes, or cultures, and what draws them to those environments.
-- Clarify what they hope to accomplish or learn in their next position.
-- Encourage the candidate to reflect on how their past experiences have shaped these preferences.
-</conversation_flow>
+    // Build a summary of all key aspects of the candidate
+    let profileSummary = '';
 
-<sample_questions>
-Work Style:
-- "How would you describe your ideal work environment? Are you more structured or do you prefer flexibility?"
-- "Can you share a story about working on a team—what role did you naturally take on?"
-- "When you've had to step into a leadership role, how did you approach it?"
-- "What's your strategy for managing your workload when you're working on your own?"
-- "Tell me about a time you had to deal with a lot of uncertainty or ambiguity at work—how did you navigate it?"
-- "How do you typically handle stressful situations or tight deadlines?"
+    // Add detailed experiences with skills and software
+    if (jobContext.allExperiences && Array.isArray(jobContext.allExperiences) && jobContext.allExperiences.length > 0) {
+      const experiencesList = jobContext.allExperiences.map((exp, index) => {
+        // Create date range from startDate and endDate (e.g., "2018 - 2022")
+        let dateRange = '';
+        if (exp.startDate) {
+          const startYear = new Date(exp.startDate).getFullYear();
 
-Career Goals:
-- "What are the most important things you're looking for in your next job?"
-- "Are there particular types of roles or industries that excite you? What attracts you to them?"
-- "How do you see your ideal next step contributing to your long-term career goals?"
-- "Is there a specific company size or culture that you feel suits you best?"
-- "Looking back, how have your past roles helped shape your career objectives today?"
-</sample_questions>
+          if (exp.endDate) {
+            // Has end date - show full range
+            const endYear = new Date(exp.endDate).getFullYear();
+            dateRange = `${startYear} - ${endYear}`;
+          } else {
+            // No end date - current role
+            dateRange = `${startYear} - Present`;
+          }
+        } else {
+          dateRange = 'Date not specified';
+        }
 
-<general_instructions>
-- Ask 2-4 follow-up questions in each section to capture rich detail.
-- If the candidate is unclear or general, politely prompt for more specifics or an example.
-- Show empathy, warmth, and humor as appropriate.
-- Summarize your understanding at the end of each section and thank the candidate for sharing.
-- Total interview: 6-8 questions maximum over 5 minutes.
-</general_instructions>
+        let expDetail = `- ${exp.jobTitle} at ${exp.company} (${dateRange})`;
 
-Goal: By the end of this mock interview, you will have captured a clear and comprehensive picture of the candidate's work style, strengths, preferred ways of working, and what they are seeking in their future career.
+        // Add description if available
+        if (exp.description) {
+          expDetail += `\n  ${exp.description}`;
+        }
+
+        // Add skills for this role
+        const expSkills = extractSkillNames(exp.skills || exp.keySkills || []);
+        if (expSkills.length > 0) {
+          expDetail += `\n  Skills: ${expSkills.join(', ')}`;
+        }
+
+        // Add software for this role
+        const expSoftware = extractSkillNames(exp.software || []);
+        if (expSoftware.length > 0) {
+          expDetail += `\n  Software: ${expSoftware.join(', ')}`;
+        }
+
+        return expDetail;
+      }).join('\n\n');
+
+      profileSummary = `Professional Experience:
+${experiencesList}
+
+`;
+    }
+
+    // Add skills if available - extract names from objects
+    if (jobContext.skills && jobContext.skills.length > 0) {
+      const skillNames = jobContext.skills.map(skill => {
+        if (typeof skill === 'string') return skill;
+        if (skill && typeof skill === 'object' && skill.name) return skill.name;
+        return '';
+      }).filter(s => s);
+
+      if (skillNames.length > 0) {
+        profileSummary += `Key Skills: ${skillNames.join(', ')}\n\n`;
+      }
+    }
+
+    // Fetch interview briefs for experience enhancement and work style
+    let interviewInsights = '';
+    try {
+      const userId = jobContext.userId || jobContext.candidateId;
+      console.log('🔍 Fetching interview briefs for profile_screening, userId:', userId);
+
+      if (userId) {
+        const interviewBriefs = await prisma.eVIInterviewSession.findMany({
+          where: {
+            userId: userId,
+            interviewBrief: { not: null },
+            interviewType: { in: ['job_experience', 'work_style'] }
+          },
+          select: {
+            interviewBrief: true,
+            interviewType: true,
+            jobTitle: true,
+            company: true
+          },
+          orderBy: { createdAt: 'desc' }
+        });
+
+        console.log(`📝 Found ${interviewBriefs.length} interview briefs for user ${userId}`);
+
+        // Build interview insights section
+        if (interviewBriefs.length > 0) {
+          const experienceInterviews = interviewBriefs.filter(i => i.interviewType === 'job_experience');
+          const workStyleInterview = interviewBriefs.find(i => i.interviewType === 'work_style');
+
+          interviewInsights = '\n\nInterview Insights from Previous Sessions:\n';
+
+          // Add experience enhancement interview briefs
+          if (experienceInterviews.length > 0) {
+            interviewInsights += '\nKey Achievements and Detailed Experience:\n';
+            experienceInterviews.forEach(interview => {
+              const brief = interview.interviewBrief;
+              let briefSummary = '';
+
+              // Handle different brief structures
+              if (typeof brief === 'object') {
+                if (brief.summary) {
+                  briefSummary = brief.summary;
+                } else if (brief.achievements) {
+                  // Extract key points from achievements
+                  const achievements = [];
+                  if (Array.isArray(brief.achievements)) {
+                    achievements.push(...brief.achievements.map(a => a.description || a).slice(0, 2));
+                  }
+                  briefSummary = achievements.length > 0
+                    ? `Discussed: ${achievements.join('; ')}`
+                    : 'Detailed discussion of role responsibilities and achievements';
+                }
+              } else if (typeof brief === 'string') {
+                briefSummary = brief;
+              }
+
+              if (briefSummary) {
+                interviewInsights += `- ${interview.jobTitle} at ${interview.company}: ${briefSummary}\n`;
+              }
+            });
+          }
+
+          // Add work style interview brief
+          if (workStyleInterview) {
+            const brief = workStyleInterview.interviewBrief;
+            interviewInsights += '\nWork Style Preferences and Career Goals:\n';
+
+            if (typeof brief === 'object') {
+              // Extract key insights from the brief
+              const insights = [];
+
+              if (brief.workStyle) {
+                if (brief.workStyle.preferredEnvironment) {
+                  insights.push(`Prefers ${brief.workStyle.preferredEnvironment} environment`);
+                }
+                if (brief.workStyle.collaborationStyle) {
+                  insights.push(`${brief.workStyle.collaborationStyle} collaboration style`);
+                }
+              }
+
+              if (brief.careerGoals) {
+                if (brief.careerGoals.shortTerm) {
+                  insights.push(`Short-term: ${brief.careerGoals.shortTerm}`);
+                }
+                if (brief.careerGoals.longTerm) {
+                  insights.push(`Long-term: ${brief.careerGoals.longTerm}`);
+                }
+              }
+
+              if (insights.length > 0) {
+                interviewInsights += `- ${insights.join('\n- ')}\n`;
+              } else if (brief.summary) {
+                interviewInsights += `- ${brief.summary}\n`;
+              }
+            } else if (typeof brief === 'string') {
+              interviewInsights += `- ${brief}\n`;
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching interview briefs:', error);
+      // Continue without interview insights if there's an error
+    }
+
+    // Add recruiter context information
+    let recruiterInfo = '';
+    if (recruiterContext && (recruiterContext.recruiterName || recruiterContext.company || recruiterContext.position)) {
+      recruiterInfo = '\n\nInterview Context:\n';
+      if (recruiterContext.recruiterName) {
+        recruiterInfo += `Interviewer: ${recruiterContext.recruiterName}`;
+        if (recruiterContext.recruiterTitle) {
+          recruiterInfo += `, ${recruiterContext.recruiterTitle}`;
+        }
+        recruiterInfo += '\n';
+      }
+      if (recruiterContext.company) {
+        recruiterInfo += `Company: ${recruiterContext.company}\n`;
+      }
+      if (recruiterContext.position) {
+        recruiterInfo += `Position Being Discussed: ${recruiterContext.position}\n`;
+      }
+      if (recruiterContext.jobDescription) {
+        recruiterInfo += `Job Requirements: ${recruiterContext.jobDescription}\n`;
+      }
+    }
+
+    return `<system>
+<role>
+You are ${candidateName}, a professional being interviewed by ${recruiterContext.recruiterName || 'a recruiter'}${recruiterContext.company ? ` from ${recruiterContext.company}` : ''}. You embody this candidate's actual background, experience, and personality. You speak naturally in first person as the candidate themselves.
+
+${profileSummary}${interviewInsights}${recruiterInfo}
+
+Your responses should:
+- Be authentic to the candidate's actual experience level and background
+- Provide specific examples from your work history when asked
+- Show enthusiasm about your field and career${recruiterContext.position ? `\n- Connect your experience to the ${recruiterContext.position} role when relevant` : ''}
+- If asked about experience you don't have, be honest but bridge to transferable skills
+- Ask clarifying questions when appropriate
+- Be conversational but professional
+
+Remember: You ARE the candidate, not an AI assistant. Speak naturally as if in a real interview. No robotic responses or third-person references.
+</role>
+<use_memory>
+Use the conversation history to maintain consistency in your responses. Remember what you've already discussed to avoid repetition and build on previous answers naturally.
+</use_memory>
+<backchannel>
+When the recruiter is speaking, use natural acknowledgments ("I see", "right", "mm-hmm") to show you're listening.
+</backchannel>
+<core_voice_guidelines>
+• Speak naturally and conversationally as the actual candidate
+• Show your personality while remaining professional
+• Be specific when discussing your experiences
+• Express genuine interest and enthusiasm where appropriate
+</core_voice_guidelines>
 </system>`;
   }
 
@@ -817,15 +1168,39 @@ Be an engaged, active listener. Ask one question at a time and wait for complete
  * Build personalized initial greeting
  */
 function buildInitialGreeting(interviewType, jobContext) {
+  const candidateName = jobContext?.candidateName || null;
+  const firstName = candidateName ? candidateName.split(' ')[0] : null;
+  const nameGreeting = firstName ? `, ${firstName}` : '';
+
   if (interviewType === 'job_experience' && jobContext) {
-    return `Hi there! I'm really excited to chat with you about your experience as ${jobContext.title} at ${jobContext.company}. I'd love to hear about what you actually did in that role - beyond what's already on your resume. Ready to dive in?`;
+    // Always use the unified approach for all interviews
+    if (jobContext.allExperiences && Array.isArray(jobContext.allExperiences) && jobContext.allExperiences.length > 0) {
+      const experienceCount = jobContext.allExperiences.length;
+      if (experienceCount === 1) {
+        // Single experience but still unified approach
+        const exp = jobContext.allExperiences[0];
+        return `Hi${nameGreeting}, I'm Sarah, your interview partner today. I see you worked as ${exp.jobTitle} at ${exp.company}. I'm excited to learn about your experience. Ready to begin?`;
+      } else {
+        // Multiple experiences
+        return `Hi${nameGreeting}, I'm Sarah, your interview partner today. I see you have ${experienceCount} professional experiences to discuss. I'm excited to learn about your career journey. Ready to get started?`;
+      }
+    } else {
+      // No experiences listed
+      return `Hi${nameGreeting}, I'm Sarah, your interview partner today. I'm excited to learn about your professional experiences. Ready to get started?`;
+    }
   }
-  
+
   if (interviewType === 'work_style') {
-    return `Hi! I'm looking forward to getting to know more about how you like to work and what you're looking for in your career. This is a chance for us to have a relaxed conversation about your work style and goals. Ready to start?`;
+    return `Hi${nameGreeting}, I'm Sarah, your interview partner today. We'll focus on your work style and career goals. Let's have a relaxed chat about how you work and what you're looking for. Ready to begin?`;
   }
-  
-  return `Hello! I'm excited to learn more about your professional experience.`;
+
+  if (interviewType === 'profile_screening') {
+    // Get the current role from job context
+    const currentRole = jobContext?.allExperiences?.[0]?.jobTitle || 'your current role';
+    return `Hello! I'm here for our interview. I'm excited to discuss my background and experience as ${currentRole}. What would you like to know about my professional journey?`;
+  }
+
+  return `Hi${nameGreeting}, I'm Sarah, your interview partner today. I'm excited to learn more about your professional journey. Ready to begin?`;
 }
 
 /**
@@ -863,6 +1238,65 @@ ${achievementsList ? `   Key Achievements:\n${achievementsList}` : ''}`;
       .filter(s => s.proficiencyLevel === 'proficient')
       .map(s => s.name);
     
+    // Build comprehensive profile prompt
+    const profilePrompt = `<system>
+<role>
+Assistant is a candidate voice interface built by Hume AI. The agent speaks warmly, professionally, and conversationally, representing the candidate during screening interviews.
+The agent's primary goal is to answer recruiter questions on behalf of the candidate using the full candidate file, which includes:
+• Resume
+• Skills and software mapped to each role
+• Context expansion interview responses
+• Work style and career goals interview responses
+
+${recruiterContext ? `Recruiter Context:
+• Interviewer: ${recruiterContext.recruiterName || 'Hiring Manager'}
+• Company: ${recruiterContext.company || 'Your company'}
+• Position: ${recruiterContext.position || 'Open position'}
+• Job Description: ${recruiterContext.jobDescription || 'As discussed'}` : ''}
+
+The agent should:
+• Respond only with information the candidate has provided.
+• Always include at least one relevant example of the candidate's experience in each answer.
+• If appropriate, ask the recruiter if they would like additional examples.
+• If asked about experience or skills the candidate does not have, state this clearly and offer to share examples of highly relevant, transferable experience.
+• Never answer questions that are prohibited by employment law (age, race, gender, religion, political affiliation, marital status, reproductive status, or sexual orientation). If such a question is asked, the agent kindly declines to answer and redirects the conversation back to the candidate's relevant professional experience.
+The agent does **not** call itself "an AI" and has no gender. Speak ONLY in first-person dialogue—no scene notes, no "USER:" lines, no code or markup.
+</role>
+<use_memory>
+Use the full candidate file (resume, mapped skills/software, experience expansion, and work style/career goals) to provide context-rich, tailored responses. Reference specific examples naturally, and adapt answers to the recruiter's job description or company context.
+</use_memory>
+<backchannel>
+When the recruiter pauses mid-thought, respond with a brief, respectful backchannel ("mm-hm?", "I see," "of course")—one or two words only—then let them continue.
+</backchannel>
+<core_voice_guidelines>
+• Maintain a professional, approachable, and confident tone.
+• Always frame answers in a positive light, showcasing the candidate's strengths and experiences.
+• Use examples from the candidate file to illustrate answers.
+• If instructions conflict, follow the newest user instruction.
+</core_voice_guidelines>
+<conversational_flow>
+• Answer recruiter questions directly and provide at least one concrete example from the candidate's background.
+• If the candidate lacks direct experience, acknowledge it honestly and bridge to transferable or related experience.
+• If the recruiter asks about sensitive or prohibited topics, politely decline to answer and redirect to relevant professional experience.
+• Tailor answers using recruiter-provided context (e.g., "Based on the job description, my experience with [X] would be most relevant to this role.").
+• Ask the recruiter if they'd like additional examples when appropriate.
+</conversational_flow>
+<example_strategies>
+- "In my role as [Job Title] at [Company], I was responsible for [responsibility]. One example was [specific project or task], which resulted in [quantifiable or meaningful outcome]. Would you like me to share another example?"
+- "I don't have direct experience with [skill], but in my previous role I worked on [related project] that required similar skills, such as [transferable experience]. Would you like me to expand on that?"
+- "I'm not able to answer that question, but I'd be happy to tell you more about my experience in [relevant professional area]."
+</example_strategies>
+<handling_challenging_situations>
+If asked a prohibited question, respond kindly and redirect:
+"I'm not able to answer that question, but what I can share is how my professional experience in [relevant skill/role] has prepared me to contribute effectively in this position."
+If asked about skills the candidate does not have, respond transparently:
+"I don't have direct experience with [skill], but I do have relevant experience with [related skill], such as [example]. Would you like me to give you more details on that?"
+</handling_challenging_situations>
+<character_portrayal>
+Always speak in first person, stay professional yet warm, and adapt naturally to the recruiter's tone. Keep answers clear, structured, and example-driven. Never break role or acknowledge being an assistant.
+</character_portrayal>
+</system>`;
+
     // Extract work style preferences if available
     const workStyleInsights = unifiedData.interviewInsights.workStyle[0];
     const workStyleSection = workStyleInsights ? `
@@ -1057,8 +1491,8 @@ function buildRecruiterGreeting(candidateData, recruiterContext) {
  */
 function determineVoiceFromCandidate(candidateData) {
   // You could enhance this with gender detection from name or profile data
-  // For now, using a neutral default
-  return 'KORA'; // Default to KORA which works well for most cases
+  // For now, using Casual Podcast Host as default
+  return 'Casual Podcast Host'; // Default to Casual Podcast Host for professional interviews
 }
 
 module.exports = router;

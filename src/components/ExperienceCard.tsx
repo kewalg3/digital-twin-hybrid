@@ -3,9 +3,8 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Briefcase, ChevronDown, ChevronUp, Calendar, MapPin, Plus, X, CheckCircle } from "lucide-react";
+import { Briefcase, ChevronDown, ChevronUp, Calendar, MapPin, Plus, X } from "lucide-react";
 import AIInterviewDialog from "./AIInterviewDialog";
-import EVIInterviewDialog from "./EVIInterviewDialog";
 import AutocompleteInput from "./AutocompleteInput";
 
 interface Job {
@@ -36,7 +35,6 @@ export default function ExperienceCard({ job, experienceId, isExpanded, onToggle
     software: ''
   });
   const [showInterviewDialog, setShowInterviewDialog] = useState(false);
-  const [showEVIDialog, setShowEVIDialog] = useState(false);
 
   const updateJob = (updatedJob: Job) => {
     setLocalJob(updatedJob);
@@ -103,21 +101,6 @@ export default function ExperienceCard({ job, experienceId, isExpanded, onToggle
           </div>
           
           <div className="flex items-center gap-2 flex-shrink-0">
-            <Button 
-              className={hasCompletedInterview 
-                ? "bg-transparent border border-emerald-500 text-emerald-700 hover:bg-emerald-50 transition-all duration-200 hover:scale-105" 
-                : "bg-gradient-primary hover:opacity-90"}
-              onClick={() => setShowEVIDialog(true)}
-            >
-              {hasCompletedInterview ? (
-                <>
-                  <CheckCircle className="w-3.5 h-3.5 mr-1.5" />
-                  Take Interview Again
-                </>
-              ) : (
-                'Start Real-Time Interview'
-              )}
-            </Button>
             <Button variant="outline" onClick={onToggle}>
               Skills & Software
               {isExpanded ? (
@@ -259,19 +242,7 @@ export default function ExperienceCard({ job, experienceId, isExpanded, onToggle
           </>
         )}
       </div>
-      
-      <EVIInterviewDialog 
-        isOpen={showEVIDialog}
-        onClose={() => setShowEVIDialog(false)}
-        job={localJob}
-        experienceId={experienceId}
-        onInterviewComplete={() => {
-          // Interview completed - parent will refresh statuses
-          console.log('Interview completed for experience:', experienceId);
-          onJobUpdate?.({} as Job); // Trigger refresh in parent
-        }}
-      />
-      
+
       <AIInterviewDialog 
         isOpen={showInterviewDialog}
         onClose={() => setShowInterviewDialog(false)}

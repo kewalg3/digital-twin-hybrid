@@ -193,10 +193,10 @@ class ResumeController {
             source: 'resume_parsed'
           }
         });
-        
+
         // Save new experiences
-        await prisma.experience.createMany({
-          data: parsedData.parsedContent.experiences.map(exp => ({
+        for (const exp of parsedData.parsedContent.experiences) {
+          const experienceData = {
             userId,
             jobTitle: exp.jobTitle,
             company: exp.company,
@@ -209,8 +209,12 @@ class ResumeController {
             keySkills: [],
             displayOrder: exp.displayOrder,
             source: 'resume_parsed'
-          }))
-        });
+          };
+
+          await prisma.experience.create({
+            data: experienceData
+          });
+        }
       }
 
       // Save parsed skills to Skillset and Software tables (remove Skills table duplication)

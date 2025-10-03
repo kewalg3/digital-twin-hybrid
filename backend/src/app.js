@@ -44,11 +44,32 @@ app.use(helmet());
 app.use(compression());
 app.use(morgan('combined'));
 
-// CORS configuration
-app.use(cors({
-  origin: ["http://localhost:8080", "http://localhost:8081", process.env.FRONTEND_URL || "http://localhost:8080"],
+// CORS configuration - More flexible for development
+const corsOptions = {
+  origin: function(origin, callback) {
+    // Allow requests with no origin (like from file:// or Postman)
+    if (!origin) return callback(null, true);
+
+    // List of allowed origins
+    const allowedOrigins = [
+      "http://localhost:8080",
+      "http://localhost:8081",
+      "http://localhost:3000",
+      "http://localhost:5173",
+      process.env.FRONTEND_URL || "http://localhost:8080"
+    ];
+
+    // Check if origin is allowed
+    if (allowedOrigins.includes(origin) || process.env.NODE_ENV === 'development') {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true
-}));
+};
+
+app.use(cors(corsOptions));
 
 // General rate limiting - TEMPORARILY INCREASED FOR DEVELOPMENT
 const limiter = rateLimit({

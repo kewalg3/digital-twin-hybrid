@@ -14,6 +14,21 @@ Digital Twin Voice Interview Platform - A full-stack application that creates AI
 - Backend has authentication, file upload, and AI integration endpoints
 
 ## Recent Work
+### Audio Streaming Fix for Hume EVI SDK (September 30, 2025)
+- Fixed critical audio issues where AI couldn't hear user and stopped speaking midway
+- Problem: Manual MediaRecorder implementation was conflicting with Hume SDK's internal audio handling
+- Root Cause:
+  - Incorrectly using `voiceClient.sendAudio()` with manual MediaRecorder chunks
+  - SDK expects to handle audio streaming internally when initialized properly
+- Solution:
+  - Removed manual MediaRecorder implementation entirely
+  - Pass media stream to VoiceClient during connection: `voiceClient.connect({ microphone: mediaStream })`
+  - Let SDK handle all audio recording and streaming internally
+  - Audio stream is now obtained before creating VoiceClient and passed during connection
+- Files modified:
+  - `/src/services/directHumeEVISDK.ts` - Removed MediaRecorder, fixed audio initialization flow
+- This fix applies to all interview types (Experience Enhancement, Work Style, Career Goals)
+
 ### EVI Speech-to-Speech Interview Fix (August 25, 2025)
 - Fixed issue where Complete Interview button wasn't working in Experience Enhancement tab
 - Problem: The timeout handler was calling `completeInterview()` which didn't exist

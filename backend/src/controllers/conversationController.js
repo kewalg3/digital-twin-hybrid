@@ -1,18 +1,10 @@
 const OpenAI = require('openai');
 const { PrismaClient } = require('@prisma/client');
-const AWS = require('aws-sdk');
 const axios = require('axios');
 
 const prisma = new PrismaClient();
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
-});
-
-// Configure AWS S3 for audio storage
-const s3 = new AWS.S3({
-  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  region: process.env.AWS_REGION
 });
 
 class ConversationController {
@@ -189,11 +181,9 @@ class ConversationController {
         }
       });
 
-      // Generate speech for twin response
+      // Note: Audio generation is not currently being stored
+      // Speech synthesis happens on-demand in the frontend
       let twinAudioUrl = null;
-      if (voiceProfile && twinResponse) {
-        twinAudioUrl = await this.generateSpeechForResponse(twinResponse, voiceProfile.humeVoiceId);
-      }
 
       // Save recruiter message
       const recruiterMessage = await prisma.conversationMessage.create({
@@ -201,7 +191,7 @@ class ConversationController {
           conversationId,
           messageType: 'recruiter_question',
           messageText,
-          audioUrl: audioData ? await this.uploadAudio(audioData, conversationId) : null,
+          audioUrl: null, // Audio files are not currently being stored
           messageOrder: await this.getNextMessageOrder(conversationId)
         }
       });
@@ -326,107 +316,8 @@ Respond as the candidate would, using "I" statements and speaking from their per
     }
   }
 
-  // Generate speech for twin response
-  async generateSpeechForResponse(text, voiceId) {
-    try {
-      const response = await axios.post('https://api.hume.ai/v0/batch/jobs', {
-        model: {
-          name: 'text-to-speech'
-        },
-        input: [
-          {
-            text: text,
-            voice_id: voiceId
-          }
-        ],
-        output: {
-          format: 'mp3',
-          sample_rate: 44100
-        }
-      }, {
-        headers: {
-          'X-Hume-Api-Key': process.env.HUME_API_KEY,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      const jobId = response.data.job_id;
-
-      // Poll for completion
-      let audioUrl = null;
-      let attempts = 0;
-      const maxAttempts = 30;
-
-      while (attempts < maxAttempts) {
-        const statusResponse = await axios.get(`https://api.hume.ai/v0/batch/jobs/${jobId}`, {
-          headers: {
-            'X-Hume-Api-Key': process.env.HUME_API_KEY
-          }
-        });
-
-        const status = statusResponse.data.status;
-
-        if (status === 'completed') {
-          const results = statusResponse.data.results;
-          if (results && results.length > 0 && results[0].audio_url) {
-            audioUrl = results[0].audio_url;
-            break;
-          }
-        } else if (status === 'failed') {
-          throw new Error('Speech generation failed');
-        }
-
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        attempts++;
-      }
-
-      if (audioUrl) {
-        // Download and upload to S3
-        const audioResponse = await axios.get(audioUrl, { responseType: 'arraybuffer' });
-        const audioBuffer = Buffer.from(audioResponse.data);
-
-        const fileName = `conversations/${Date.now()}-${Math.random().toString(36).substring(7)}.mp3`;
-        
-        const uploadParams = {
-          Bucket: process.env.AWS_S3_BUCKET,
-          Key: fileName,
-          Body: audioBuffer,
-          ContentType: 'audio/mpeg',
-          ACL: 'private'
-        };
-
-        const uploadResult = await s3.upload(uploadParams).promise();
-        return uploadResult.Location;
-      }
-
-      return null;
-    } catch (error) {
-      console.error('Generate speech error:', error);
-      return null;
-    }
-  }
-
-  // Upload audio file
-  async uploadAudio(audioData, conversationId) {
-    try {
-      const audioBuffer = Buffer.from(audioData, 'base64');
-      const fileName = `conversations/${conversationId}/${Date.now()}-${Math.random().toString(36).substring(7)}.webm`;
-      
-      const uploadParams = {
-        Bucket: process.env.AWS_S3_BUCKET,
-        Key: fileName,
-        Body: audioBuffer,
-        ContentType: 'audio/webm',
-        ACL: 'private'
-      };
-
-      const uploadResult = await s3.upload(uploadParams).promise();
-      return uploadResult.Location;
-    } catch (error) {
-      console.error('Upload audio error:', error);
-      return null;
-    }
-  }
+  // Note: Audio generation and storage methods have been removed
+  // Audio is handled on-demand in the frontend using Hume AI directly
 
   // Get next message order
   async getNextMessageOrder(conversationId) {
