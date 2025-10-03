@@ -13,8 +13,7 @@
     "preview": "vite preview",
     "deploy:dev": "git push origin develop",
     "deploy:prod": "git checkout main && git merge develop && git push origin main && git checkout develop",
-    "setup:dev-db": "cd backend && npm run db:push:dev",
-    "postinstall": "cd backend && npm install"
+    "setup:dev-db": "cd backend && npm run db:push:dev"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.0",
