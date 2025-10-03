@@ -60,7 +60,19 @@
       "Bash(git commit:*)",
       "Bash(git checkout:*)",
       "Bash(git pull:*)",
-      "Bash(git merge:*)"
+      "Bash(git merge:*)",
+      "Bash(git fetch:*)",
+      "WebFetch(domain:api.github.com)",
+      "Bash(git log:*)",
+      "Bash(npx vercel:*)",
+      "Read(//var/folders/7h/l6hf4d556l97gl5cjgxgc33m0000gn/T/TemporaryItems/NSIRD_screencaptureui_4KkCod/**)",
+      "Bash(git config:*)",
+      "Read(//var/folders/7h/l6hf4d556l97gl5cjgxgc33m0000gn/T/TemporaryItems/NSIRD_screencaptureui_iBUCkq/**)",
+      "Read(//var/folders/7h/l6hf4d556l97gl5cjgxgc33m0000gn/T/TemporaryItems/NSIRD_screencaptureui_CsdU2w/**)",
+      "Bash(vercel:*)",
+      "Bash(sudo chown:*)",
+      "Read(//var/folders/7h/l6hf4d556l97gl5cjgxgc33m0000gn/T/TemporaryItems/NSIRD_screencaptureui_3rKFfJ/**)",
+      "Read(//var/folders/7h/l6hf4d556l97gl5cjgxgc33m0000gn/T/TemporaryItems/NSIRD_screencaptureui_dAsXUU/**)"
     ],
     "deny": []
   },
