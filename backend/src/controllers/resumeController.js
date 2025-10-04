@@ -5,6 +5,9 @@ const fallbackResumeParser = require('../services/fallbackResumeParser');
 
 const prisma = new PrismaClient();
 
+// Get base URL from environment or use localhost for development
+const BASE_URL = process.env.BASE_URL || 'http://localhost:3001';
+
 class ResumeController {
   // Upload resume file
   async uploadResume(req, res) {
@@ -53,7 +56,7 @@ class ResumeController {
       const uploadResult = {
         filename: `${userId}/${Date.now()}-${file.name}`,
         originalFilename: file.name,
-        fileUrl: `http://localhost:3001/uploads/${file.name}`,
+        fileUrl: `${BASE_URL}/uploads/${file.name}`,
         fileSize: file.size,
         mimeType: file.mimetype,
         uploadedAt: new Date()
