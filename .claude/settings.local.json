@@ -73,7 +73,13 @@
       "Bash(sudo chown:*)",
       "Read(//var/folders/7h/l6hf4d556l97gl5cjgxgc33m0000gn/T/TemporaryItems/NSIRD_screencaptureui_3rKFfJ/**)",
       "Read(//var/folders/7h/l6hf4d556l97gl5cjgxgc33m0000gn/T/TemporaryItems/NSIRD_screencaptureui_dAsXUU/**)",
-      "Read(//var/folders/7h/l6hf4d556l97gl5cjgxgc33m0000gn/T/TemporaryItems/NSIRD_screencaptureui_OTHuPi/**)"
+      "Read(//var/folders/7h/l6hf4d556l97gl5cjgxgc33m0000gn/T/TemporaryItems/NSIRD_screencaptureui_OTHuPi/**)",
+      "Bash(cat:*)",
+      "Read(//var/folders/7h/l6hf4d556l97gl5cjgxgc33m0000gn/T/TemporaryItems/NSIRD_screencaptureui_HdZKmV/**)",
+      "Read(//var/folders/7h/l6hf4d556l97gl5cjgxgc33m0000gn/T/TemporaryItems/NSIRD_screencaptureui_WI9g8R/**)",
+      "Read(//var/folders/7h/l6hf4d556l97gl5cjgxgc33m0000gn/T/TemporaryItems/NSIRD_screencaptureui_Wxfkag/**)",
+      "Bash(npx vite:*)",
+      "Read(//var/folders/7h/l6hf4d556l97gl5cjgxgc33m0000gn/T/TemporaryItems/NSIRD_screencaptureui_2WzJva/**)"
     ],
     "deny": []
   },
