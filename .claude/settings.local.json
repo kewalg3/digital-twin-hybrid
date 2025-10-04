@@ -79,7 +79,9 @@
       "Read(//var/folders/7h/l6hf4d556l97gl5cjgxgc33m0000gn/T/TemporaryItems/NSIRD_screencaptureui_WI9g8R/**)",
       "Read(//var/folders/7h/l6hf4d556l97gl5cjgxgc33m0000gn/T/TemporaryItems/NSIRD_screencaptureui_Wxfkag/**)",
       "Bash(npx vite:*)",
-      "Read(//var/folders/7h/l6hf4d556l97gl5cjgxgc33m0000gn/T/TemporaryItems/NSIRD_screencaptureui_2WzJva/**)"
+      "Read(//var/folders/7h/l6hf4d556l97gl5cjgxgc33m0000gn/T/TemporaryItems/NSIRD_screencaptureui_2WzJva/**)",
+      "Bash(nvm install:*)",
+      "Read(//var/folders/7h/l6hf4d556l97gl5cjgxgc33m0000gn/T/TemporaryItems/NSIRD_screencaptureui_2GA6G1/**)"
     ],
     "deny": []
   },
