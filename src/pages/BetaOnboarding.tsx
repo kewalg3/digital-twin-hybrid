@@ -1388,7 +1388,7 @@ export default function BetaOnboarding() {
                     </div>
                   </div>
                 ) : parsedExperiences.length > 0 ? (
-                  parsedExperiences.map((experience, index) => {
+                  [...parsedExperiences].reverse().map((experience, index) => {
                     console.log('🔍 Rendering experience:', experience);
                     
                     // Auto-populate skills and software from parsed data that match this job

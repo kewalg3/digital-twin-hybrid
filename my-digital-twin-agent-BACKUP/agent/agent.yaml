@@ -1,0 +1,17 @@
+api_version: v1
+kind: Agent
+metadata:
+  name: digital-twin-interviewer
+  description: AI-powered digital twin for job interviews
+spec:
+  entry_point: src/agent.py:entrypoint
+  runtime: python
+  python_version: "3.11"
+  environment_variables:
+    - BACKEND_URL
+    - LIVEKIT_URL
+    - LIVEKIT_API_KEY
+    - LIVEKIT_API_SECRET
+    - OPENAI_API_KEY
+    - ELEVEN_API_KEY
+  dependencies_file: pyproject.toml

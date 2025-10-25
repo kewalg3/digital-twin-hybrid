@@ -54,10 +54,10 @@ class DirectHumeEVI {
   private baseUrl: string;
 
   constructor() {
-    // Use environment variable for API URL
-    this.baseUrl = `${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/evi-interview`;
-    
-    console.log('🎯 DirectHumeEVI SDK initialized with baseUrl:', this.baseUrl);
+    // Use environment variable for API URL - CLEAN ARCHITECTURE
+    this.baseUrl = `${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/interview`;
+
+    console.log('🎯 DirectHumeEVI SDK initialized with CLEAN baseUrl:', this.baseUrl);
   }
 
   /**
@@ -153,8 +153,9 @@ class DirectHumeEVI {
         configResponse = await fetch(`${this.baseUrl}/create-config`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            userId, 
+          body: JSON.stringify({
+            userId,
+            candidateData: { id: userId }, // Simplified for clean architecture
             interviewType, 
             jobContext,
             experienceId: jobContext?.experienceId 
@@ -451,8 +452,118 @@ class DirectHumeEVI {
         this.emit('audio_end'); // Treat as audio playback ended
         break;
 
+      case 'tool_call':
+        console.log('🔧 Tool call received:', message);
+        await this.handleToolCall(message);
+        break;
+
       default:
         console.log('📨 Unknown message:', message.type, message);
+    }
+  }
+
+  /**
+   * Handle tool call from Hume EVI
+   */
+  private async handleToolCall(message: any): Promise<void> {
+    try {
+      console.log('🔧 Processing tool call:', {
+        toolCallId: message.tool_call_id,
+        name: message.name,
+        parameters: message.parameters
+      });
+
+      // Parse parameters from the tool call
+      const parameters = JSON.parse(message.parameters);
+      console.log('📥 Parsed parameters:', parameters);
+
+      // Call backend get-answer endpoint
+      const response = await fetch(`${this.baseUrl}/get-answer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: parameters.user_id,
+          question: parameters.question
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Backend request failed' }));
+        console.error('❌ Backend get-answer failed:', errorData);
+
+        // Send tool error back to Hume
+        await this.sendToolError(message.tool_call_id, errorData.error || 'Failed to get answer from backend');
+        return;
+      }
+
+      const answerData = await response.json();
+      console.log('✅ Got answer from backend:', answerData);
+
+      // Send tool response back to Hume
+      await this.sendToolResponse(message.tool_call_id, answerData.answer || answerData.response || 'No answer provided');
+
+    } catch (error) {
+      console.error('❌ Error handling tool call:', error);
+      await this.sendToolError(message.tool_call_id, `Tool call failed: ${error.message}`);
+    }
+  }
+
+  /**
+   * Send tool response back to Hume EVI
+   */
+  private async sendToolResponse(toolCallId: string, content: string): Promise<void> {
+    if (!this.voiceClient) {
+      console.error('❌ Cannot send tool response: no voice client');
+      return;
+    }
+
+    try {
+      const toolResponse = {
+        type: 'tool_response',
+        tool_call_id: toolCallId,
+        content: content
+      };
+
+      console.log('📤 Sending tool response:', toolResponse);
+
+      // Use the voice client's sendToolMessage method
+      await this.voiceClient.sendToolMessage(toolResponse);
+      console.log('✅ Tool response sent successfully');
+
+    } catch (error) {
+      console.error('❌ Error sending tool response:', error);
+      // Try to send an error message instead
+      await this.sendToolError(toolCallId, 'Failed to send tool response');
+    }
+  }
+
+  /**
+   * Send tool error back to Hume EVI
+   */
+  private async sendToolError(toolCallId: string, errorMessage: string): Promise<void> {
+    if (!this.voiceClient) {
+      console.error('❌ Cannot send tool error: no voice client');
+      return;
+    }
+
+    try {
+      const toolError = {
+        type: 'tool_error',
+        tool_call_id: toolCallId,
+        error: errorMessage,
+        code: 'TOOL_EXECUTION_ERROR',
+        level: 'error',
+        content: `I apologize, but I encountered an error: ${errorMessage}`
+      };
+
+      console.log('📤 Sending tool error:', toolError);
+
+      // Use the voice client's sendToolMessage method
+      await this.voiceClient.sendToolMessage(toolError);
+      console.log('✅ Tool error sent successfully');
+
+    } catch (error) {
+      console.error('❌ Error sending tool error:', error);
     }
   }
 

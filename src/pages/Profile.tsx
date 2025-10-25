@@ -6,8 +6,9 @@ import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { ChevronDown, Mic, MapPin, User, Target, ChevronUp, Volume2, Sparkles, Loader2, Video } from "lucide-react";
 import ProfileVoiceInterviewDialog from "@/components/ProfileVoiceInterviewDialog";
-import { ChevronDown, Mic, MapPin, User, Target, ChevronUp, Volume2, Sparkles, Loader2 } from "lucide-react";
+import ProfileLiveKitInterviewDialog from "@/components/ProfileLiveKitInterviewDialog";
 
 interface UserProfile {
   id: string;
@@ -49,9 +50,10 @@ export default function Profile() {
   const [isInterviewContextOpen, setIsInterviewContextOpen] = useState(false);
   const [isResumeOpen, setIsResumeOpen] = useState(false);
   const [isSkillsOpen, setIsSkillsOpen] = useState(false);
-  const [showVoiceDialog, setShowVoiceDialog] = useState(false);
   const [sortColumn, setSortColumn] = useState<'years' | 'lastUsed' | null>(null);
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [isInterviewDialogOpen, setIsInterviewDialogOpen] = useState(false);
+  const [isLiveKitDialogOpen, setIsLiveKitDialogOpen] = useState(false);
 
   // Fetch user profile data on mount
   useEffect(() => {
@@ -258,14 +260,27 @@ export default function Profile() {
                 </p>
               </div>
 
-              <div className="flex justify-center">
-                <Button 
+              <div className="flex justify-center gap-4">
+                {/* Hume EVI Button - Hidden but kept for future use */}
+                <Button
                   size="lg"
-                  onClick={() => setShowVoiceDialog(true)}
-                  className="bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white px-8 py-3 text-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105"
+                  onClick={() => setIsInterviewDialogOpen(true)}
+                  className="bg-gradient-to-r from-primary to-cyan-500 hover:opacity-90 text-white px-8 py-3 text-lg font-semibold shadow-lg"
+                  style={{ display: 'none' }}
                 >
                   <Mic className="w-5 h-5 mr-3" />
-                  Start Voice Screening
+                  Start Voice Screening (Hume)
+                  <Sparkles className="w-4 h-4 ml-2" />
+                </Button>
+
+                {/* LiveKit Interview Button - Visible */}
+                <Button
+                  size="lg"
+                  onClick={() => setIsLiveKitDialogOpen(true)}
+                  className="bg-gradient-to-r from-purple-500 to-pink-500 hover:opacity-90 text-white px-8 py-3 text-lg font-semibold shadow-lg"
+                >
+                  <Video className="w-5 h-5 mr-3" />
+                  Start LiveKit Interview
                   <Sparkles className="w-4 h-4 ml-2" />
                 </Button>
               </div>
@@ -438,15 +453,28 @@ export default function Profile() {
           </Collapsible>
         </div>
       </div>
-      
-      {/* Enhanced Voice Interview Dialog */}
-      <ProfileVoiceInterviewDialog 
-        isOpen={showVoiceDialog}
-        onClose={() => setShowVoiceDialog(false)}
-        candidateId={userProfile.id}
-        candidateName={userProfile.fullName}
-        candidateData={userProfile}
-      />
+
+      {/* Profile Voice Interview Dialog - Hume EVI */}
+      {userProfile && (
+        <ProfileVoiceInterviewDialog
+          isOpen={isInterviewDialogOpen}
+          onClose={() => setIsInterviewDialogOpen(false)}
+          candidateId={userProfile.id}
+          candidateName={userProfile.fullName}
+          candidateData={userProfile}
+        />
+      )}
+
+      {/* Profile LiveKit Interview Dialog */}
+      {userProfile && (
+        <ProfileLiveKitInterviewDialog
+          isOpen={isLiveKitDialogOpen}
+          onClose={() => setIsLiveKitDialogOpen(false)}
+          candidateId={userProfile.id}
+          candidateName={userProfile.fullName}
+          candidateData={userProfile}
+        />
+      )}
     </div>
   );
 }
