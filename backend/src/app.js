@@ -35,6 +35,9 @@ const authMiddleware = require('./middleware/auth');
 const app = express();
 const server = createServer(app);
 
+// Enable trust proxy for Railway/production
+app.set('trust proxy', 1);
+
 // Removed Socket.IO initialization - using direct Hume WebSocket API calls instead
 
 const prisma = new PrismaClient();
