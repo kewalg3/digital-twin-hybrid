@@ -3,8 +3,9 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 model User {
@@ -32,6 +33,7 @@ model User {
   skillsets            Skillset[]
   software             Software[]
   voiceProfiles        VoiceProfile[]
+  livekitInterviewSessions LiveKitInterviewSession[]
 
   @@map("users")
 }
@@ -232,16 +234,19 @@ model EVIInterviewMessage {
 }
 
 model Recruiter {
-  id          String               @id @default(cuid())
-  name        String
-  email       String?              @unique
-  title       String?
-  company     String?
-  linkedinUrl String?
-  phone       String?
-  createdAt   DateTime             @default(now())
-  updatedAt   DateTime             @updatedAt
-  interviews  RecruiterInterview[]
+  id               String                    @id @default(cuid())
+  name             String
+  email            String?                   @unique
+  title            String?
+  company          String?
+  linkedinUrl      String?
+  phone            String?
+  jobTitle         String?                   // Job position they're hiring for
+  jobDescription   String?                   @db.Text // Detailed job description
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+  interviews       RecruiterInterview[]
+  livekitInterviews LiveKitInterviewSession[] @relation("RecruiterInterviews")
 
   @@map("recruiters")
 }
@@ -259,4 +264,25 @@ model RecruiterInterview {
 
   @@unique([recruiterId, eviInterviewSessionId])
   @@map("recruiter_interviews")
+}
+
+model LiveKitInterviewSession {
+  id              String    @id @default(cuid())
+  candidateId     String
+  recruiterId     String?
+  roomName        String    @unique
+  transcript      Json      // [{speaker: 'user'|'agent', text: '...', timestamp: 123}]
+  fullTranscript  String?   @db.Text
+  duration        Int?      // Duration in seconds
+  highlights      Json?     // AI-generated highlights
+  status          String    @default("completed")
+  startedAt       DateTime
+  completedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  candidate       User      @relation(fields: [candidateId], references: [id])
+  recruiter       Recruiter? @relation("RecruiterInterviews", fields: [recruiterId], references: [id])
+
+  @@map("livekit_interview_sessions")
 }

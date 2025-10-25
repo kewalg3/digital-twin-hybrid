@@ -1,0 +1,14 @@
+{
+  "user_id": "test-user-001",
+  "schema": {
+    "intent": "answer_experience",
+    "grounding": {
+      "roles_used": ["cmgoom0kw0001vd0vcnz0t7d1"],
+      "fields_used": ["company", "title", "start"]
+    },
+    "verbatim": {
+      "company": "R-Link",
+      "title": "Founder and CEO"
+    }
+  }
+}

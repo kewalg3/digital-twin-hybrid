@@ -19,8 +19,8 @@ const resumeRoutes = require('./routes/resumes');
 const interviewRoutes = require('./routes/interviews');
 const conversationRoutes = require('./routes/conversations');
 // Removed: Legacy voice routes (voiceRoutes, voiceInterviewRoutes) - disabled by feature flags
-// const eviInterviewRoutes = require('./routes/eviInterview'); // REMOVED: Old proxy approach
-const eviConfigOnlyRoutes = require('./routes/eviConfigOnly');
+// CLEAN ARCHITECTURE: Single interview route with one tool
+const interviewAPIRoutes = require('./routes/interview');
 const eviInterviewRoutes = require('./routes/eviInterviews');
 const onboardingRoutes = require('./routes/onboarding');
 const userRoutes = require('./routes/users');
@@ -138,11 +138,12 @@ app.get('/health', (req, res) => {
 // API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/resumes', authMiddleware, resumeRoutes);
-app.use('/api/interviews', authMiddleware, interviewRoutes);
+app.use('/api/interviews', interviewRoutes); // No auth - public endpoint for recruiter interviews
 app.use('/api/conversations', authMiddleware, conversationRoutes);
-// EVI interviews are enabled by default
-app.use('/api/evi-interview', eviConfigOnlyRoutes); // Config-only backend, frontend connects directly to Hume
+// CLEAN ARCHITECTURE: Simple interview API with one tool
+app.use('/api/interview', interviewAPIRoutes); // Single endpoint approach
 app.use('/api/evi-interviews', eviInterviewRoutes); // NEW: EVI interview completion processing
+app.use('/api/livekit-interviews', require('./routes/livekit-interviews')); // NEW: LiveKit interview completion
 app.use('/api/onboarding', onboardingRoutes); // NEW: Unified onboarding API
 // Apply auth middleware selectively for user routes
 app.use('/api/users', (req, res, next) => {

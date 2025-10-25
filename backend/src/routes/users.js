@@ -71,6 +71,18 @@ router.get('/profile/:userId', async (req, res) => {
             lastUsed: true,
             source: true
           }
+        },
+        eviInterviewSessions: {
+          select: {
+            id: true,
+            jobTitle: true,
+            company: true,
+            interviewBrief: true,  // This contains the insights!
+            achievements: true,
+            createdAt: true
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 10  // Get last 10 interviews
         }
       }
     });
@@ -106,7 +118,9 @@ router.get('/profile/:userId', async (req, res) => {
       skills: [
         ...user.skillsets.map(skill => ({ ...skill, type: 'skill' })),
         ...user.software.map(sw => ({ ...sw, type: 'software' }))
-      ]
+      ],
+      // Include interview insights for richer context
+      interviewInsights: user.eviInterviewSessions || []
     };
 
     console.log('✅ Public profile fetched successfully for:', userId);
@@ -407,6 +421,188 @@ router.put('/profile', async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+// ==========================================
+// LIVEKIT AGENT ENDPOINTS (No Auth Required)
+// ==========================================
+
+// Get comprehensive resume data for agent function calling
+router.get('/:userId/resume-data', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    console.log('🤖 Agent fetching resume data for user:', userId);
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        fullName: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        phone: true,
+        city: true,
+        state: true,
+        country: true,
+        linkedinUrl: true,
+        resumes: {
+          select: {
+            id: true,
+            extractedName: true,
+            skillsExtracted: true,
+            totalExperience: true,
+            parsedContent: true,
+            professionalSummary: true,
+            educationInfo: true,
+            contactInfo: true,
+            createdAt: true
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 1
+        }
+      }
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        personal: {
+          name: user.fullName,
+          email: user.email,
+          phone: user.phone,
+          location: `${user.city}, ${user.state}, ${user.country}`,
+          linkedin: user.linkedinUrl
+        },
+        resume: user.resumes[0] || null,
+        hasResume: user.resumes.length > 0
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Agent resume data fetch error:', error);
+    res.status(500).json({ error: 'Failed to fetch resume data' });
+  }
+});
+
+// Get detailed work experiences for agent
+router.get('/:userId/experiences', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    console.log('🤖 Agent fetching experiences for user:', userId);
+
+    const experiences = await prisma.experience.findMany({
+      where: { userId: userId },
+      select: {
+        id: true,
+        jobTitle: true,
+        company: true,
+        location: true,
+        startDate: true,
+        endDate: true,
+        isCurrentRole: true,
+        description: true,
+        achievements: true,
+        skills: true,
+        software: true,
+        aiEnhancedAchievements: true
+      },
+      orderBy: { startDate: 'desc' }
+    });
+
+    res.json({
+      success: true,
+      data: experiences.map(exp => ({
+        ...exp,
+        duration: calculateDuration(exp.startDate, exp.endDate, exp.isCurrentRole),
+        skills: exp.skills || [],
+        software: exp.software || [],
+        achievements: exp.achievements || []
+      }))
+    });
+
+  } catch (error) {
+    console.error('❌ Agent experiences fetch error:', error);
+    res.status(500).json({ error: 'Failed to fetch experiences' });
+  }
+});
+
+// Get skills information for agent
+router.get('/:userId/skills', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    console.log('🤖 Agent fetching skills for user:', userId);
+
+    const skillsets = await prisma.skillset.findMany({
+      where: { userId: userId },
+      include: {
+        skills: {
+          select: {
+            id: true,
+            name: true,
+            proficiencyLevel: true,
+            category: true,
+            isEndorsed: true
+          }
+        }
+      }
+    });
+
+    const software = await prisma.software.findMany({
+      where: { userId: userId },
+      select: {
+        id: true,
+        name: true,
+        proficiencyLevel: true,
+        category: true,
+        versions: true
+      }
+    });
+
+    res.json({
+      success: true,
+      data: {
+        skillsets: skillsets,
+        software: software,
+        summary: {
+          totalSkills: skillsets.reduce((acc, skillset) => acc + skillset.skills.length, 0),
+          totalSoftware: software.length,
+          categories: [...new Set([
+            ...skillsets.flatMap(s => s.skills.map(skill => skill.category)),
+            ...software.map(s => s.category)
+          ])].filter(Boolean)
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Agent skills fetch error:', error);
+    res.status(500).json({ error: 'Failed to fetch skills' });
+  }
+});
+
+// Helper function to calculate duration
+function calculateDuration(startDate, endDate, isCurrent) {
+  const start = new Date(startDate);
+  const end = isCurrent ? new Date() : new Date(endDate);
+
+  const monthDiff = (end.getFullYear() - start.getFullYear()) * 12 +
+                   (end.getMonth() - start.getMonth());
+
+  const years = Math.floor(monthDiff / 12);
+  const months = monthDiff % 12;
+
+  if (years === 0) {
+    return `${months} month${months !== 1 ? 's' : ''}`;
+  } else if (months === 0) {
+    return `${years} year${years !== 1 ? 's' : ''}`;
+  } else {
+    return `${years} year${years !== 1 ? 's' : ''} ${months} month${months !== 1 ? 's' : ''}`;
+  }
+}
 
 
 module.exports = router;
