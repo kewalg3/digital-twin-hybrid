@@ -7,6 +7,7 @@ import ProfilePhotoUpload from "@/components/ProfilePhotoUpload";
 import ExperienceCard from "@/components/ExperienceCard";
 import WorkStyleInterviewDialog from "@/components/WorkStyleInterviewDialog";
 import EVIInterviewDialog from "@/components/EVIInterviewDialog";
+import ExperienceLiveKitInterviewDialog from "@/components/ExperienceLiveKitInterviewDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -46,6 +47,12 @@ interface OnboardingData {
     mediumProfile: string;
     twitterProfile: string;
     stackOverflowProfile: string;
+    // Job Preferences
+    seekingOpportunities: string;
+    employmentType: string;
+    workLocations: string[];
+    willingToRelocate: boolean | null;
+    openToContract: boolean | null;
   };
   profilePhoto?: File;
   workStyle: {
@@ -143,6 +150,7 @@ export default function BetaOnboarding() {
   const [isCombinedInterview, setIsCombinedInterview] = useState(false);
   const [combinedInterviewCompleted, setCombinedInterviewCompleted] = useState(false);
   const [showEVIInterviewDialog, setShowEVIInterviewDialog] = useState(false);
+  const [showLiveKitInterviewDialog, setShowLiveKitInterviewDialog] = useState(false);
   const [selectedExperience, setSelectedExperience] = useState<any>(null);
   
   // Request deduplication to prevent excessive API calls
@@ -180,6 +188,12 @@ export default function BetaOnboarding() {
       mediumProfile: "",
       twitterProfile: "",
       stackOverflowProfile: "",
+      // Job Preferences
+      seekingOpportunities: "",
+      employmentType: "",
+      workLocations: [],
+      willingToRelocate: null,
+      openToContract: null,
     },
     workStyle: {
       careerGoals: "",
@@ -255,16 +269,46 @@ export default function BetaOnboarding() {
   };
 
   const handleNext = async () => {
+    console.log('🔄 handleNext called:', {
+      currentStep,
+      currentUserId,
+      userFromAuth: user?.id,
+      shouldSave: currentStep === 2
+    });
+
     // Save personal info when navigating from step 2 (Personal Information)
-    if (currentStep === 2 && currentUserId) {
+    if (currentStep === 2) {
+      const userIdToSave = currentUserId || user?.id;
+      console.log('💾 Attempting to save personal info:', {
+        userIdToSave,
+        hasPersonalInfoData: !!data.personalInfo,
+        jobPreferencesData: {
+          seekingOpportunities: data.personalInfo.seekingOpportunities,
+          employmentType: data.personalInfo.employmentType,
+          workLocations: data.personalInfo.workLocations,
+          willingToRelocate: data.personalInfo.willingToRelocate,
+          openToContract: data.personalInfo.openToContract
+        }
+      });
+
+      if (!userIdToSave) {
+        toast({
+          title: "Save failed",
+          description: "User ID not found. Please try logging in again.",
+          variant: "destructive"
+        });
+        return;
+      }
+
       setIsLoading(true);
       try {
-        await savePersonalInfo(currentUserId);
+        await savePersonalInfo(userIdToSave);
         toast({
           title: "Personal information saved!",
           description: "Your profile has been updated successfully.",
         });
       } catch (error) {
+        console.error('❌ Save personal info error:', error);
         toast({
           title: "Save failed",
           description: "Failed to save personal information. Please try again.",
@@ -385,19 +429,13 @@ export default function BetaOnboarding() {
   const canProceed = () => {
     switch (currentStep) {
       case 1:
-        // Can proceed if has new resume OR existing resume
-        const canProceedStep1 = !!data.resume || !!existingResume;
+        // Simple rule: Button enabled if user has a resume with parsing_complete: true
+        const canProceedStep1 = !!existingResume?.parsing_complete;
+
         console.log('🔍 Step 1 canProceed check:', {
-          hasDataResume: !!data.resume,
-          hasExistingResume: !!existingResume,
-          existingResume,
-          dataResume: data.resume,
-          canProceed: canProceedStep1,
-          userEmail: user?.email,
-          userId: user?.id,
-          isLoading: isLoading,
-          resumeUploading: resumeUploading,
-          buttonShouldBeEnabled: canProceedStep1 && !isLoading && !resumeUploading
+          existingResume: existingResume,
+          parsing_complete: existingResume?.parsing_complete,
+          canProceed: canProceedStep1
         });
         return canProceedStep1;
       case 2:
@@ -673,6 +711,12 @@ export default function BetaOnboarding() {
             mediumProfile: user.mediumUrl || prev.personalInfo.mediumProfile,
             twitterProfile: user.twitterUrl || prev.personalInfo.twitterProfile,
             stackOverflowProfile: user.stackOverflowUrl || prev.personalInfo.stackOverflowProfile,
+            // Job Preferences
+            seekingOpportunities: user.seekingOpportunities || prev.personalInfo.seekingOpportunities,
+            employmentType: user.employmentType || prev.personalInfo.employmentType,
+            workLocations: user.workLocations || prev.personalInfo.workLocations,
+            willingToRelocate: user.willingToRelocate !== null ? user.willingToRelocate : prev.personalInfo.willingToRelocate,
+            openToContract: user.openToContract !== null ? user.openToContract : prev.personalInfo.openToContract,
           }
         }));
         console.log('✅ Personal info loaded with priority: User saved > Resume extracted > Empty');
@@ -689,21 +733,29 @@ export default function BetaOnboarding() {
   // Save personal info to database
   const savePersonalInfo = async (userId: string) => {
     try {
-      console.log('💾 Saving personal info for userId:', userId, data.personalInfo);
+      console.log('💾 savePersonalInfo called with userId:', userId);
+      console.log('📤 Request URL:', `${import.meta.env.VITE_API_URL}/users/${userId}`);
+      console.log('📦 Request body (personal info):', data.personalInfo);
+
       const response = await fetch(`${import.meta.env.VITE_API_URL}/users/${userId}`, {
         method: 'PUT',
-        headers: { 
+        headers: {
           'Authorization': `Bearer ${useAuthStore.getState().token}`,
-          'Content-Type': 'application/json' 
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify(data.personalInfo)
       });
-      
+
+      console.log('📥 Response status:', response.status);
+
       if (response.ok) {
-        console.log('✅ Personal info saved to database');
+        const responseData = await response.json();
+        console.log('✅ Personal info saved to database successfully');
+        console.log('📥 Response data:', responseData);
         return true;
       } else {
-        console.error('❌ Failed to save personal info');
+        const errorData = await response.text();
+        console.error('❌ Failed to save personal info:', response.status, errorData);
         return false;
       }
     } catch (error) {
@@ -798,21 +850,26 @@ export default function BetaOnboarding() {
         }
       }
       
-      // Auto-advance to next step after ensuring data is loaded
+      // Smart auto-advance: only if user is still on resume upload step
       setTimeout(async () => {
-        // Get fresh onboarding status to determine correct step
         try {
+          // Get fresh resume data to check parsing status
           const freshData = await onboardingApi.getUserOnboardingData();
-          const correctStep = determineCurrentStep(freshData.onboardingStatus);
-          console.log('🎯 Auto-advancing to step:', correctStep);
-          setCurrentStep(correctStep);
+          const updatedResume = freshData.resume;
+
+          // Update existing resume with fresh data including parsing_complete status
+          if (freshData.resume) {
+            setExistingResume(freshData.resume);
+            console.log('✅ Updated resume data with parsing status:', freshData.resume.parsing_complete);
+          }
+
+          // No auto-advance - let user proceed manually when button becomes active
+          console.log('🎯 Parsing complete - user can now proceed manually via Next button');
+
         } catch (error) {
-          console.warn('Failed to get fresh onboarding status, defaulting to step 2');
-          setCurrentStep(2);
+          console.error('❌ Failed to get fresh resume status:', error);
         }
-        
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-        
+
         toast({
           title: "Resume processed successfully!",
           description: "Your information has been extracted and saved.",
@@ -826,10 +883,11 @@ export default function BetaOnboarding() {
         response: error.response?.data,
         stack: error.stack
       });
-      
+
+
       // Extract user-friendly error message
       let errorMessage = "Failed to upload resume. Please try again.";
-      
+
       if (error.response?.data?.error) {
         errorMessage = error.response.data.error;
       } else if (error.response?.status === 413) {
@@ -841,7 +899,7 @@ export default function BetaOnboarding() {
       } else if (error.message) {
         errorMessage = error.message;
       }
-      
+
       toast({
         title: "Upload failed",
         description: errorMessage,
@@ -1102,6 +1160,36 @@ export default function BetaOnboarding() {
                 onFileSelect={handleResumeUpload}
                 isUploading={resumeUploading}
               />
+
+              {/* Processing Indicator */}
+              {existingResume && !existingResume.parsing_complete && (
+                <Card className="p-4 bg-blue-50 border-blue-200 mt-4">
+                  <div className="flex items-center gap-3">
+                    <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
+                    <div className="flex-1">
+                      <h4 className="font-medium text-blue-900">Processing Your Resume...</h4>
+                      <p className="text-sm text-blue-700">
+                        Extracting experiences, skills, and personal information. Please wait.
+                      </p>
+                    </div>
+                  </div>
+                </Card>
+              )}
+
+              {/* Parsing Complete Indicator */}
+              {existingResume?.parsing_complete && (
+                <Card className="p-4 bg-green-50 border-green-200 mt-4">
+                  <div className="flex items-center gap-3">
+                    <CheckCircle className="w-5 h-5 text-green-600" />
+                    <div className="flex-1">
+                      <h4 className="font-medium text-green-900">Resume Processed Successfully!</h4>
+                      <p className="text-sm text-green-700">
+                        Your resume has been analyzed and is ready. You can now proceed to the next step.
+                      </p>
+                    </div>
+                  </div>
+                </Card>
+              )}
             </div>
             
             {/* Skip button if existing resume */}
@@ -1264,6 +1352,212 @@ export default function BetaOnboarding() {
 
               <Separator />
 
+              {/* Job Preferences */}
+              <div className="space-y-4">
+                <div>
+                  <h3 className="text-lg font-semibold">Job Preferences</h3>
+                </div>
+
+                {/* Are you actively or passively seeking new opportunities? */}
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium">Are you actively or passively seeking new opportunities?</Label>
+                  <div className="flex gap-6">
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="radio"
+                        id="seeking-active"
+                        name="seekingOpportunities"
+                        value="active"
+                        checked={data.personalInfo.seekingOpportunities === "active"}
+                        onChange={(e) => updatePersonalInfo('seekingOpportunities', e.target.value)}
+                        className="w-4 h-4"
+                      />
+                      <Label htmlFor="seeking-active" className="text-sm cursor-pointer">Active (actively looking)</Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="radio"
+                        id="seeking-passive"
+                        name="seekingOpportunities"
+                        value="passive"
+                        checked={data.personalInfo.seekingOpportunities === "passive"}
+                        onChange={(e) => updatePersonalInfo('seekingOpportunities', e.target.value)}
+                        className="w-4 h-4"
+                      />
+                      <Label htmlFor="seeking-passive" className="text-sm cursor-pointer">Passive (open to opportunities)</Label>
+                    </div>
+                  </div>
+                </div>
+
+                {/* What type of employment hours are you seeking? */}
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium">What type of employment hours are you seeking?</Label>
+                  <div className="flex gap-6">
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="radio"
+                        id="employment-full-time"
+                        name="employmentType"
+                        value="full_time"
+                        checked={data.personalInfo.employmentType === "full_time"}
+                        onChange={(e) => updatePersonalInfo('employmentType', e.target.value)}
+                        className="w-4 h-4"
+                      />
+                      <Label htmlFor="employment-full-time" className="text-sm cursor-pointer">Full Time</Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="radio"
+                        id="employment-part-time"
+                        name="employmentType"
+                        value="part_time"
+                        checked={data.personalInfo.employmentType === "part_time"}
+                        onChange={(e) => updatePersonalInfo('employmentType', e.target.value)}
+                        className="w-4 h-4"
+                      />
+                      <Label htmlFor="employment-part-time" className="text-sm cursor-pointer">Part Time</Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="radio"
+                        id="employment-either"
+                        name="employmentType"
+                        value="either"
+                        checked={data.personalInfo.employmentType === "either"}
+                        onChange={(e) => updatePersonalInfo('employmentType', e.target.value)}
+                        className="w-4 h-4"
+                      />
+                      <Label htmlFor="employment-either" className="text-sm cursor-pointer">Either</Label>
+                    </div>
+                  </div>
+                </div>
+
+                {/* What work locations are acceptable to you? (Select all that apply) */}
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium">What work locations are acceptable to you? (Select all that apply)</Label>
+                  <div className="flex gap-6">
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="checkbox"
+                        id="location-onsite"
+                        value="onsite"
+                        checked={data.personalInfo.workLocations.includes("onsite")}
+                        onChange={(e) => {
+                          const locations = data.personalInfo.workLocations;
+                          if (e.target.checked) {
+                            updatePersonalInfo('workLocations', [...locations, "onsite"]);
+                          } else {
+                            updatePersonalInfo('workLocations', locations.filter(loc => loc !== "onsite"));
+                          }
+                        }}
+                        className="w-4 h-4"
+                      />
+                      <Label htmlFor="location-onsite" className="text-sm cursor-pointer">Onsite</Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="checkbox"
+                        id="location-hybrid"
+                        value="hybrid"
+                        checked={data.personalInfo.workLocations.includes("hybrid")}
+                        onChange={(e) => {
+                          const locations = data.personalInfo.workLocations;
+                          if (e.target.checked) {
+                            updatePersonalInfo('workLocations', [...locations, "hybrid"]);
+                          } else {
+                            updatePersonalInfo('workLocations', locations.filter(loc => loc !== "hybrid"));
+                          }
+                        }}
+                        className="w-4 h-4"
+                      />
+                      <Label htmlFor="location-hybrid" className="text-sm cursor-pointer">Hybrid</Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="checkbox"
+                        id="location-remote"
+                        value="remote"
+                        checked={data.personalInfo.workLocations.includes("remote")}
+                        onChange={(e) => {
+                          const locations = data.personalInfo.workLocations;
+                          if (e.target.checked) {
+                            updatePersonalInfo('workLocations', [...locations, "remote"]);
+                          } else {
+                            updatePersonalInfo('workLocations', locations.filter(loc => loc !== "remote"));
+                          }
+                        }}
+                        className="w-4 h-4"
+                      />
+                      <Label htmlFor="location-remote" className="text-sm cursor-pointer">Remote</Label>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Are you willing to relocate for work? */}
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium">Are you willing to relocate for work?</Label>
+                  <div className="flex gap-6">
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="radio"
+                        id="relocate-yes"
+                        name="willingToRelocate"
+                        value="true"
+                        checked={data.personalInfo.willingToRelocate === true}
+                        onChange={(e) => updatePersonalInfo('willingToRelocate', true)}
+                        className="w-4 h-4"
+                      />
+                      <Label htmlFor="relocate-yes" className="text-sm cursor-pointer">Yes</Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="radio"
+                        id="relocate-no"
+                        name="willingToRelocate"
+                        value="false"
+                        checked={data.personalInfo.willingToRelocate === false}
+                        onChange={(e) => updatePersonalInfo('willingToRelocate', false)}
+                        className="w-4 h-4"
+                      />
+                      <Label htmlFor="relocate-no" className="text-sm cursor-pointer">No</Label>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Are you open to Contract/Temporary employment opportunities? */}
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium">Are you open to Contract/Temporary employment opportunities?</Label>
+                  <div className="flex gap-6">
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="radio"
+                        id="contract-yes"
+                        name="openToContract"
+                        value="true"
+                        checked={data.personalInfo.openToContract === true}
+                        onChange={(e) => updatePersonalInfo('openToContract', true)}
+                        className="w-4 h-4"
+                      />
+                      <Label htmlFor="contract-yes" className="text-sm cursor-pointer">Yes</Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="radio"
+                        id="contract-no"
+                        name="openToContract"
+                        value="false"
+                        checked={data.personalInfo.openToContract === false}
+                        onChange={(e) => updatePersonalInfo('openToContract', false)}
+                        className="w-4 h-4"
+                      />
+                      <Label htmlFor="contract-no" className="text-sm cursor-pointer">No</Label>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <Separator />
+
               {/* Online Presence */}
               <div className="space-y-4">
                 <div>
@@ -1339,6 +1633,34 @@ export default function BetaOnboarding() {
                     'Refresh Experiences'
                   )}
                 </Button>
+                {/* LiveKit Interview Button - Hidden for production release */}
+                {false && (
+                <Button
+                  onClick={() => {
+                    setShowLiveKitInterviewDialog(true);
+                    setIsCombinedInterview(true);
+                    // Create a combined job object with all experiences
+                    const combinedJob = {
+                      title: 'Combined Interview',
+                      company: 'All Experiences',
+                      duration: '',
+                      location: '',
+                      description: 'Interview covering all work experiences',
+                      skills: [],
+                      software: [],
+                      aiSuggestedSkills: [],
+                      aiSuggestedSoftware: [],
+                      allExperiences: parsedExperiences
+                    };
+                    setSelectedExperience(combinedJob);
+                  }}
+                  className="bg-green-600 hover:bg-green-700"
+                  size="sm"
+                  disabled={!parsedExperiences || parsedExperiences.length === 0}
+                >
+                  {combinedInterviewCompleted ? 'Redo Interview LK' : 'Start Interview LK'}
+                </Button>
+                )}
                 <Button
                   onClick={() => {
                     // Use the existing combined interview dialog
@@ -1363,7 +1685,7 @@ export default function BetaOnboarding() {
                   size="sm"
                   disabled={!parsedExperiences || parsedExperiences.length === 0}
                 >
-                  {combinedInterviewCompleted ? 'Take Interview Again' : 'Start Real-Time Interview'}
+                  {combinedInterviewCompleted ? 'Redo Interview' : 'Start Interview'}
                 </Button>
               </div>
 
@@ -1419,7 +1741,7 @@ export default function BetaOnboarding() {
                     const jobData = {
                       title: experience.jobTitle || 'Untitled Position',
                       company: experience.company || 'Unknown Company',
-                      duration: experience.startDate && experience.endDate ? 
+                      duration: experience.startDate && (experience.endDate || experience.isCurrentRole) ?
                         `${new Date(experience.startDate).getFullYear()} - ${
                           experience.isCurrentRole ? 'Present' : new Date(experience.endDate).getFullYear()
                         }` : 'Duration not specified',
@@ -1428,7 +1750,10 @@ export default function BetaOnboarding() {
                       skills: skills || [],
                       software: software || [],
                       aiSuggestedSkills: aiSuggestedSkills || [],
-                      aiSuggestedSoftware: aiSuggestedSoftware || []
+                      aiSuggestedSoftware: aiSuggestedSoftware || [],
+                      startDate: experience.startDate,
+                      endDate: experience.endDate,
+                      isCurrentRole: experience.isCurrentRole
                     };
 
                     console.log('🔧 Transformed job data:', jobData);
@@ -1506,6 +1831,28 @@ export default function BetaOnboarding() {
                 }}
               />
             )}
+
+            {showLiveKitInterviewDialog && (
+              <ExperienceLiveKitInterviewDialog
+                isOpen={showLiveKitInterviewDialog}
+                onClose={() => {
+                  setShowLiveKitInterviewDialog(false);
+                  setIsCombinedInterview(false);
+                  setSelectedExperience(null);
+                }}
+                job={selectedExperience}
+                onInterviewComplete={() => {
+                  setCombinedInterviewCompleted(true);
+                  setShowLiveKitInterviewDialog(false);
+                  setIsCombinedInterview(false);
+                  setSelectedExperience(null);
+                  // Refresh all interview statuses
+                  if (user?.id && parsedExperiences.length > 0) {
+                    fetchInterviewStatuses(user.id);
+                  }
+                }}
+              />
+            )}
           </div>
         );
 
@@ -1548,7 +1895,7 @@ export default function BetaOnboarding() {
                   {hasCompletedWorkStyleInterview ? (
                     <>
                       <CheckCircle className="w-4 h-4 mr-2" />
-                      Take Interview Again
+                      Redo Interview
                     </>
                   ) : (
                     'Start Interview'
@@ -1862,10 +2209,10 @@ export default function BetaOnboarding() {
         
         <Button
           onClick={handleNext}
-          disabled={!canProceed() || isLoading || resumeUploading}
+          disabled={!canProceed() || resumeUploading}
           className="bg-gradient-primary hover:opacity-90"
         >
-          {isLoading || resumeUploading ? (
+          {resumeUploading ? (
             <>
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />
               Processing...

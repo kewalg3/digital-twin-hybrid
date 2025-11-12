@@ -23,6 +23,12 @@ model User {
   zipCode              String?
   address              String?
   profileComplete      Boolean               @default(false)
+  // Job Preferences
+  seekingOpportunities String?   // "active" | "passive"
+  employmentType       String?   // "full_time" | "part_time" | "either"
+  workLocations        String[]  // ["onsite", "hybrid", "remote"]
+  willingToRelocate    Boolean?
+  openToContract       Boolean?
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
   conversations        Conversation[]
@@ -64,6 +70,7 @@ model Resume {
   extractedLinkedIn String?
   extractedState    String?
   extractedZipCode  String?
+  parsing_complete  Boolean  @default(false)
   user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("resumes")
@@ -275,6 +282,10 @@ model LiveKitInterviewSession {
   fullTranscript  String?   @db.Text
   duration        Int?      // Duration in seconds
   highlights      Json?     // AI-generated highlights
+  achievements    Json?     // For experience enhancement interviews (EVI-style achievements)
+  interviewBrief  Json?     // For experience enhancement interviews (EVI-style brief)
+  interviewType   String?   @default("general") // general, experience_enhancement, etc.
+  experienceData  Json?     // Job/experience data for experience enhancement interviews
   status          String    @default("completed")
   startedAt       DateTime
   completedAt     DateTime?

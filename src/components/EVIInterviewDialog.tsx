@@ -241,8 +241,7 @@ export default function EVIInterviewDialog({ isOpen, onClose, job, experienceId,
       setupDirectEVIMessageHandlers();
       
       toast({
-        title: "Direct Interview Started",
-        description: "Connected directly to Hume! Audio bypasses our backend entirely."
+        title: "Work Experience Interview Started"
       });
       
     } catch (error) {
@@ -624,20 +623,15 @@ export default function EVIInterviewDialog({ isOpen, onClose, job, experienceId,
           <Mic className="w-8 h-8 text-primary" />
         </div>
         <div>
-          <h3 className="text-xl font-semibold mb-2">Real-Time AI Interview: {job?.title || 'Combined Interview'}</h3>
+          <h3 className="text-xl font-semibold mb-2">Experience Enhancement Interview</h3>
           <p className="text-muted-foreground">{job?.company || 'All Experiences'} {job?.duration ? `• ${job.duration}` : ''}</p>
         </div>
       </div>
 
       <Card className="p-4 bg-muted/50">
-        <h4 className="font-medium mb-2">🎯 Enhance Your Profile with AI-Powered Interview:</h4>
         <ul className="text-sm text-muted-foreground space-y-1">
-          <li>• <strong>Build your digital presence</strong> - Your responses create an interactive profile that recruiters can engage with</li>
           <li>• <strong>Share your achievements</strong> - Discuss specific projects, metrics, and daily responsibilities in detail</li>
           <li>• <strong>AI-guided conversation</strong> - Based on top industry interview practices to highlight what matters most</li>
-          <li>• <strong>Quick & efficient</strong> - Complete in just 5 minutes with natural conversation flow</li>
-          <li>• <strong>Enhance your marketability</strong> - Your detailed responses will be analyzed to showcase your expertise</li>
-          <li>• <strong>How it works</strong> - The AI will greet you, then ask about your role; simply speak naturally and share your experiences</li>
         </ul>
       </Card>
 
@@ -656,7 +650,7 @@ export default function EVIInterviewDialog({ isOpen, onClose, job, experienceId,
               Starting...
             </>
           ) : (
-            'Start Direct Interview'
+            'Start Interview'
           )}
         </Button>
       </div>
@@ -671,17 +665,14 @@ export default function EVIInterviewDialog({ isOpen, onClose, job, experienceId,
           <Loader2 className="w-8 h-8 text-primary animate-spin" />
         </div>
         <div>
-          <h3 className="text-xl font-semibold mb-2">Connecting to EVI...</h3>
-          <p className="text-muted-foreground">
-            Setting up real-time voice connection and initializing your interview
-          </p>
+          <h3 className="text-xl font-semibold mb-2">Starting Interview</h3>
         </div>
       </div>
       
       <Card className="p-4 bg-muted/50">
         <div className="text-center">
           <p className="text-sm text-muted-foreground">
-            Please wait while we establish your real-time conversation with Hume's Empathic Voice Interface
+            Please wait while we load your work experience
           </p>
         </div>
       </Card>
@@ -704,10 +695,9 @@ export default function EVIInterviewDialog({ isOpen, onClose, job, experienceId,
           )}
         </div>
         <div>
-          <h3 className="text-xl font-semibold">Real-Time Interview in Progress</h3>
+          <h3 className="text-xl font-semibold">Interview in Progress</h3>
           <div className="space-y-1">
-            <p className="text-lg font-mono">{formatTime(currentTime)}</p>
-            <p className={`text-sm font-mono ${getTimeColor(currentTime)}`}>
+            <p className={`text-lg font-mono ${getTimeColor(currentTime)}`}>
               {currentTime >= MAX_INTERVIEW_DURATION ? (
                 'TIME EXCEEDED'
               ) : (
@@ -719,7 +709,7 @@ export default function EVIInterviewDialog({ isOpen, onClose, job, experienceId,
             {isAIPlaying && (
               <>
                 <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-                <span>AI Speaking...</span>
+                <span>Interviewer Speaking...</span>
               </>
             )}
             {isListening && !isAIPlaying && (
@@ -742,7 +732,7 @@ export default function EVIInterviewDialog({ isOpen, onClose, job, experienceId,
             <div key={index} className={`text-sm ${
               message.type === 'assistant_message' ? 'text-primary' : 'text-foreground'
             }`}>
-              <strong>{message.type === 'assistant_message' ? 'AI:' : 'You:'}</strong> {message.content}
+              <strong>{message.type === 'assistant_message' ? 'Interviewer:' : 'You:'}</strong> {message.content}
             </div>
           ))}
           {transcript.length === 0 && (

@@ -4,6 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useAuthStore } from "@/store/authStore";
+// VoiceProvider removed - Profile interviews now use directHumeEVI like WorkStyle
 
 // Original pages
 import Index from "./pages/Index";
@@ -28,46 +29,46 @@ const App = () => {
         <Toaster />
         <Sonner />
         <BrowserRouter>
-          <Routes>
-            {/* Public routes */}
-            <Route path="/" element={<Index />} />
-            
-            {/* Auth routes */}
-            <Route 
-              path="/auth/login" 
-              element={
-                isAuthenticated ? <Navigate to="/dashboard" replace /> : <Login />
-              } 
-            />
-            
-            {/* Protected routes */}
-            <Route 
-              path="/beta-onboarding" 
-              element={<BetaOnboarding />} 
-            />
-            <Route 
-              path="/beta-onboarding-original" 
-              element={<BetaOnboarding />} 
-            />
-            <Route 
-              path="/dashboard" 
-              element={
-                <ProtectedRoute>
-                  <Dashboard />
-                </ProtectedRoute>
-              } 
-            />
-            {/* Public profile route with userId parameter */}
-            <Route 
-              path="/profile/:userId" 
-              element={<Profile />} 
-            />
-            
-            {/* Catch-all route */}
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </BrowserRouter>
-      </TooltipProvider>
+        <Routes>
+          {/* Public routes */}
+          <Route path="/" element={<Index />} />
+
+          {/* Auth routes */}
+          <Route
+            path="/auth/login"
+            element={
+              isAuthenticated ? <Navigate to="/dashboard" replace /> : <Login />
+            }
+          />
+
+          {/* Protected routes */}
+          <Route
+            path="/beta-onboarding"
+            element={<BetaOnboarding />}
+          />
+          <Route
+            path="/beta-onboarding-original"
+            element={<BetaOnboarding />}
+          />
+          <Route
+            path="/dashboard"
+            element={
+              <ProtectedRoute>
+                <Dashboard />
+              </ProtectedRoute>
+            }
+          />
+          {/* Public profile route with userId parameter */}
+          <Route
+            path="/profile/:userId"
+            element={<Profile />}
+          />
+
+          {/* Catch-all route */}
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </BrowserRouter>
+    </TooltipProvider>
     </QueryClientProvider>
   );
 };

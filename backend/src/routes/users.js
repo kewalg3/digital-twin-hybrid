@@ -25,6 +25,12 @@ router.get('/profile/:userId', async (req, res) => {
         state: true,
         country: true,
         linkedinUrl: true,
+        // Job Preferences
+        seekingOpportunities: true,
+        employmentType: true,
+        workLocations: true,
+        willingToRelocate: true,
+        openToContract: true,
         // Don't expose email or phone in public profile
         resumes: {
           select: {
@@ -229,6 +235,12 @@ router.get('/:userId', async (req, res) => {
         country: true,
         zipCode: true,
         address: true,
+        // Job Preferences
+        seekingOpportunities: true,
+        employmentType: true,
+        workLocations: true,
+        willingToRelocate: true,
+        openToContract: true,
         createdAt: true
       }
     });
@@ -262,7 +274,13 @@ router.put('/:userId', async (req, res) => {
       githubProfile,
       portfolioWebsite,
       twitterProfile,
-      phoneCountry
+      phoneCountry,
+      // Job Preferences
+      seekingOpportunities,
+      employmentType,
+      workLocations,
+      willingToRelocate,
+      openToContract
     } = req.body;
 
     // Combine first and last name for the name field
@@ -281,7 +299,13 @@ router.put('/:userId', async (req, res) => {
         state: state || undefined,
         country: country || undefined,
         zipCode: zipCode || undefined,
-        address: address || undefined
+        address: address || undefined,
+        // Job Preferences
+        seekingOpportunities: seekingOpportunities || undefined,
+        employmentType: employmentType || undefined,
+        workLocations: workLocations || undefined,
+        willingToRelocate: willingToRelocate !== null ? willingToRelocate : undefined,
+        openToContract: openToContract !== null ? openToContract : undefined
       }
     });
 

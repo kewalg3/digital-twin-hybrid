@@ -54,11 +54,52 @@ router.post('/start', async (req, res) => {
             recruiterPhone,
             company,
             jobTitle,
-            jobDescription
+            jobDescription,
+            interviewType,
+            experienceData
         } = req.body;
 
         // Debug log to see what backend received
         console.log('🔍 Backend received:', req.body);
+
+        // Debug: Check if we need to fetch candidate experience data from database
+        console.log('🔍 Experience data analysis:');
+        console.log('  - experienceData from frontend:', experienceData ? 'Present' : 'NULL');
+        console.log('  - candidateId:', candidateId);
+
+        // If no experience data provided, try to fetch from database
+        let finalExperienceData = experienceData;
+        if (!experienceData && candidateId) {
+            console.log('🔍 No experience data provided, fetching from database...');
+            try {
+                // Fetch candidate's experience from database
+                const candidateWithExperience = await prisma.user.findUnique({
+                    where: { id: candidateId },
+                    include: {
+                        experiences: {
+                            orderBy: { startDate: 'desc' }
+                        }
+                    }
+                });
+
+                console.log('🔍 Database query result:');
+                console.log('  - Candidate found:', candidateWithExperience ? 'Yes' : 'No');
+                console.log('  - Experience count:', candidateWithExperience?.experiences?.length || 0);
+
+                if (candidateWithExperience?.experiences?.length > 0) {
+                    finalExperienceData = candidateWithExperience.experiences;
+                    console.log('✅ Found experience data in database:', finalExperienceData.length, 'experiences');
+                } else {
+                    console.log('❌ No experience data found in database');
+                }
+            } catch (dbError) {
+                console.error('❌ Error fetching candidate experience:', dbError);
+            }
+        } else if (experienceData) {
+            console.log('✅ Using experience data from frontend');
+        } else {
+            console.log('❌ No candidateId provided, cannot fetch experience data');
+        }
 
         // Handle recruiter creation/update if recruiter info is provided
         let recruiterId = null;
@@ -107,8 +148,15 @@ router.post('/start', async (req, res) => {
             recruiter_title: recruiterTitle,
             company: company,
             job_title: jobTitle,
-            job_description: jobDescription
+            job_description: jobDescription,
+            interview_type: interviewType,
+            experience_data: finalExperienceData
         });
+
+        console.log('🔍 Final experience data summary:');
+        console.log('  - Type:', typeof finalExperienceData);
+        console.log('  - Is Array:', Array.isArray(finalExperienceData));
+        console.log('  - Length/Content:', finalExperienceData ? (Array.isArray(finalExperienceData) ? finalExperienceData.length : 'Object') : 'NULL');
 
         // 2. Dispatch agent with metadata (from docs: https://docs.livekit.io/agents/worker/agent-dispatch/#dispatch-via-api)
         // The metadata should be passed as a JSON string directly
@@ -119,7 +167,9 @@ router.post('/start', async (req, res) => {
             recruiter_title: recruiterTitle,
             company: company,
             job_title: jobTitle,
-            job_description: jobDescription
+            job_description: jobDescription,
+            interview_type: interviewType || 'general',
+            experience_data: finalExperienceData
         });
 
         console.log('🚀 Dispatching agent with metadata:', dispatchMetadata);

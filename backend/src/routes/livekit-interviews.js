@@ -16,7 +16,9 @@ const validateCompleteInterview = [
   body('roomName').notEmpty().withMessage('Room name is required'),
   body('candidateId').notEmpty().withMessage('Candidate ID is required'),
   body('transcript').isArray().withMessage('Transcript must be an array'),
-  body('duration').optional().isNumeric().withMessage('Duration must be a number')
+  body('duration').optional().isNumeric().withMessage('Duration must be a number'),
+  body('interviewType').optional().isString().withMessage('Interview type must be a string'),
+  body('experienceData').optional().isObject().withMessage('Experience data must be an object')
 ];
 
 const handleValidationErrors = (req, res, next) => {
@@ -30,6 +32,168 @@ const handleValidationErrors = (req, res, next) => {
   }
   next();
 };
+
+/**
+ * Extract achievements for experience enhancement interviews using OpenAI
+ */
+async function extractAchievements({ transcript, experienceData }) {
+  try {
+    console.log('🧠 Extracting achievements for experience enhancement interview...');
+
+    // Format transcript for OpenAI (note: LiveKit format is different from EVI format)
+    const transcriptText = transcript.map(entry =>
+      `${entry.speaker === 'agent' ? 'AI:' : 'Candidate:'} ${entry.text}`
+    ).join('\n');
+
+    // Extract job details from experience data
+    const jobTitle = experienceData?.title || 'Not specified';
+    const company = experienceData?.company || 'Not specified';
+    const duration = experienceData?.duration || 'Not specified';
+
+    const prompt = `Job Title: ${jobTitle}
+Company: ${company}
+Duration: ${duration || 'Not specified'}
+
+Transcript of the Interview:
+${transcriptText}
+
+Extract formal bullet points summarizing the candidate's achievements or contributions based ONLY on what they specifically said in the interview transcript above.
+
+CRITICAL RULES:
+- Only extract achievements that were explicitly mentioned by the candidate in the transcript
+- Do NOT use any information from the job description
+- Do NOT infer or assume achievements that weren't directly stated
+- If the candidate didn't provide enough specific information about achievements, return an empty array
+
+Return a JSON object in this exact format:
+{
+  "achievements": [
+    {"text": "Achievement description starting with action verb", "category": "technical"},
+    {"text": "Another achievement description", "category": "leadership"}
+  ],
+  "summary": {
+    "totalAchievements": 4,
+    "dominantCategories": ["technical", "leadership"]
+  }
+}
+
+Categories should be: "technical", "leadership", "process_improvement", "business_impact", or "collaboration"
+Keep each bullet concise and specific.
+If no clear achievements were mentioned in the interview, return {"achievements": [], "summary": {"totalAchievements": 0, "dominantCategories": []}}`;
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4",
+      messages: [
+        {
+          role: "system",
+          content: "You are a professional resume writer. Extract achievements as structured JSON with bullet points starting with action verbs. ONLY extract achievements that were explicitly stated by the candidate in the interview transcript. Do NOT use job description information. If no specific achievements were mentioned, return an empty achievements array. Return only valid JSON."
+        },
+        {
+          role: "user",
+          content: prompt
+        }
+      ],
+      temperature: 0.3,
+      max_tokens: 1000
+    });
+
+    const aiResponse = response.choices[0].message.content.trim();
+    console.log('🤖 OpenAI achievements response:', aiResponse);
+
+    // Parse JSON response
+    let achievements;
+    try {
+      achievements = JSON.parse(aiResponse);
+      console.log('✅ Successfully parsed achievements:', JSON.stringify(achievements, null, 2));
+      console.log('📊 Achievement count:', achievements.achievements ? achievements.achievements.length : 0);
+    } catch (parseError) {
+      console.error('⚠️ Failed to parse OpenAI JSON:', parseError);
+      console.log('Raw response that failed to parse:', aiResponse);
+      // Fallback: return empty achievements
+      achievements = {
+        achievements: [],
+        summary: {
+          totalAchievements: 0,
+          dominantCategories: []
+        }
+      };
+    }
+
+    return achievements;
+
+  } catch (error) {
+    console.error('❌ Error extracting achievements:', error);
+    // Return empty achievements on error
+    return {
+      achievements: [],
+      summary: {
+        totalAchievements: 0,
+        dominantCategories: []
+      }
+    };
+  }
+}
+
+/**
+ * Generate interview brief for experience enhancement interviews using OpenAI
+ */
+async function generateInterviewBrief(transcript) {
+  try {
+    console.log('📝 Generating experience enhancement interview brief...');
+
+    // Format transcript for OpenAI
+    const transcriptText = transcript.map(entry =>
+      `${entry.speaker === 'agent' ? 'AI:' : 'Candidate:'} ${entry.text}`
+    ).join('\n');
+
+    const prompt = `Based on this job experience interview transcript, create a concise brief summarizing:
+1. Key technical skills and expertise demonstrated
+2. Most significant achievements and impacts
+3. Leadership or collaboration examples
+4. Problem-solving approaches used
+
+Only include information explicitly stated in the transcript. Do not make assumptions or infer details not mentioned.
+Keep the brief under 200 words.
+
+Transcript:
+${transcriptText}`;
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4",
+      messages: [
+        {
+          role: "system",
+          content: "You are a professional interviewer creating concise briefs from interview transcripts. Only use information explicitly stated. Never make assumptions or add information not in the transcript."
+        },
+        {
+          role: "user",
+          content: prompt
+        }
+      ],
+      temperature: 0.3,
+      max_tokens: 400
+    });
+
+    const brief = response.choices[0].message.content.trim();
+    console.log('✅ Interview brief generated successfully');
+
+    return {
+      summary: brief,
+      generatedAt: new Date().toISOString(),
+      wordCount: brief.split(' ').length
+    };
+
+  } catch (error) {
+    console.error('❌ Error generating interview brief:', error);
+    // Return a fallback brief
+    return {
+      summary: "Interview transcript processed. Please refer to full transcript for details.",
+      generatedAt: new Date().toISOString(),
+      wordCount: 0,
+      error: true
+    };
+  }
+}
 
 /**
  * Generate interview highlights using OpenAI
@@ -108,7 +272,9 @@ router.post('/complete', validateCompleteInterview, handleValidationErrors, asyn
       candidateId,
       recruiterId,
       transcript,
-      duration
+      duration,
+      interviewType,
+      experienceData
     } = req.body;
 
     // Generate full transcript text
@@ -116,9 +282,24 @@ router.post('/complete', validateCompleteInterview, handleValidationErrors, asyn
       `[${new Date(entry.timestamp).toISOString()}] ${entry.speaker}: ${entry.text}`
     ).join('\n\n');
 
-    // Generate AI highlights
-    console.log('🤖 Generating interview highlights...');
-    const highlights = await generateHighlights(transcript);
+    // Generate AI highlights or achievements based on interview type
+    let highlights, achievements, interviewBrief;
+
+    if (interviewType === 'experience_enhancement') {
+      console.log('🎯 Processing experience enhancement interview...');
+      // For experience enhancement interviews, extract achievements and brief (like EVI)
+      achievements = await extractAchievements({ transcript, experienceData });
+      interviewBrief = await generateInterviewBrief(transcript);
+
+      // Set highlights to null for experience enhancement interviews (UI will use achievements instead)
+      highlights = null;
+    } else {
+      console.log('🤖 Generating standard interview highlights...');
+      // For regular interviews, generate highlights as before
+      highlights = await generateHighlights(transcript);
+      achievements = null;
+      interviewBrief = null;
+    }
 
     // Save to database
     console.log('💾 Saving interview session to database...');
@@ -131,6 +312,10 @@ router.post('/complete', validateCompleteInterview, handleValidationErrors, asyn
         fullTranscript,
         duration,
         highlights,
+        achievements,
+        interviewBrief,
+        interviewType: interviewType || 'general',
+        experienceData,
         status: 'completed',
         startedAt: new Date(transcript[0]?.timestamp || Date.now()),
         completedAt: new Date()
@@ -154,7 +339,10 @@ router.post('/complete', validateCompleteInterview, handleValidationErrors, asyn
       data: {
         sessionId: session.id,
         roomName: session.roomName,
+        interviewType: session.interviewType,
         highlights: session.highlights,
+        achievements: session.achievements,
+        interviewBrief: session.interviewBrief,
         candidate: session.candidate
       }
     });

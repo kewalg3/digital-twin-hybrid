@@ -248,7 +248,8 @@ router.post('/resume/parse', async (req, res) => {
     const updatedResume = await prisma.resume.update({
       where: { id: resumeId },
       data: {
-        parsingStatus: 'completed'
+        parsingStatus: 'completed',
+        parsing_complete: true
       }
     });
 

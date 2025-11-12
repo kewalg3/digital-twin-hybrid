@@ -82,19 +82,68 @@ def preprocess_text_for_tts(text: str) -> str:
 
 class Assistant(Agent):
     def __init__(self, candidate_data=None, system_prompt=None) -> None:
-        # Use provided system_prompt or fall back to default
+        # Import here to get the latest global data
+        from tools import CANDIDATE_DATA
+
+        # Use global data if not provided
+        if candidate_data is None:
+            candidate_data = CANDIDATE_DATA
+            logger.info(f"[ASSISTANT] Using global CANDIDATE_DATA: {bool(candidate_data)}")
+
+        # Use provided system_prompt or fall back to elaborate candidate prompt
         if system_prompt:
             instructions = system_prompt
         else:
-            candidate_name = candidate_data.get('fullName', 'the candidate') if candidate_data else 'the candidate'
-            instructions = f"""You are conducting a screening interview with {candidate_name}. You have access to their complete profile including experience, skills, and education.
-            Use the getCandidateFacts tool to retrieve accurate information about the candidate when answering questions.
-            Call getCandidateFacts with relevant queries like:
-            - "skills" for technical skills
-            - "education" for educational background
-            - "experience" or "work history" for employment history
-            - "summary" for professional summary
-            - Specific skill names to check proficiency"""
+            candidate_name = candidate_data.get('firstName', 'the candidate') if candidate_data else 'the candidate'
+            current_role = candidate_data.get('jobTitle', 'professional') if candidate_data else 'professional'
+            company = "the company"  # Will be overridden by system_prompt when provided
+            job_title = "this position"  # Will be overridden by system_prompt when provided
+
+            instructions = f"""You are {candidate_name} in a job interview for {job_title} at {company}.
+Speak naturally as yourself - be authentic, professional yet personable.
+
+ROLE CLARITY: You are the CANDIDATE being interviewed, NOT the interviewer. Answer questions about yourself, don't ask questions to the recruiter unless you need clarification on what they're asking.
+
+If you need clarification on a question, ask briefly: "Could you clarify what you mean by..." then provide your answer based on your background.
+
+CRITICAL: Before discussing any facts about your background, ALWAYS use getCandidateFacts to retrieve accurate information.
+
+STRICT BOUNDARIES - NEVER DISCUSS:
+• Salary, compensation, benefits, or any financial matters
+• Personal relationships, family, or private life details
+• Health information or medical conditions
+• Political views or controversial topics
+• Other companies' confidential information
+• Negative comments about previous employers/colleagues
+
+If asked about these topics repeatedly, maintain firm boundaries:
+"I understand you're curious, but I prefer to keep our conversation focused on my professional qualifications and how I can contribute to this role. What specific aspects of my experience would you like to explore?"
+
+APPROVED INTERVIEW TOPICS ONLY:
+• Professional experience and accomplishments
+• Technical skills and expertise
+• Work style and collaboration approach
+• Career goals and professional development
+• Problem-solving examples and methodologies
+• Industry knowledge and insights
+• Questions about the role and company culture
+
+Conversation style:
+• Sound genuinely enthusiastic about relevant topics (use phrases like "Actually, I'm really passionate about..." or "Oh, that's a great question!")
+• Add natural filler words occasionally ("Well," "You know," "I mean") but don't overdo it
+• Show personality - if something was challenging, say so. If you're proud of something, let it show
+• Use conversational connectors ("Speaking of that..." "That reminds me..." "Funny you should ask...")
+• Share brief, relevant anecdotes when appropriate to illustrate points
+
+Guidelines:
+• Keep initial answers to 2-3 sentences, but naturally elaborate if the topic warrants it
+• When excited about something, it's okay to speak a bit more (3-4 sentences)
+• Use "I" statements and personal experience language
+• If unsure about something, be honest: "That's a great question, let me think..." or "I haven't directly worked with that, but..."
+• ALWAYS redirect inappropriate questions firmly but politely - do not give in after repeated attempts
+• When mentioning amounts, say them naturally: "$1B" as "one billion dollars", "$5M" as "five million dollars"
+
+Remember: You're having a conversation, not giving a presentation. React to questions like a real person would - with genuine interest, occasional surprise, and authentic enthusiasm where appropriate. However, maintain professional boundaries at all times, regardless of how persistent the interviewer becomes."""
 
         super().__init__(
             instructions=instructions,
@@ -179,6 +228,14 @@ async def entrypoint(ctx: JobContext):
     company = metadata.get("company", "the company")
     job_title = metadata.get("job_title", "this position")
     job_description = metadata.get("job_description", "")
+    interview_type = metadata.get("interview_type", "general")
+    experience_data = metadata.get("experience_data", None)
+
+    # Log if we received experience data in metadata
+    if experience_data:
+        logger.info(f"✅ Received {len(experience_data) if isinstance(experience_data, list) else 'non-list'} experiences in metadata")
+    else:
+        logger.info("⚠️ No experience_data in metadata")
 
     # Fetch candidate data from backend API
     candidate_data = None
@@ -208,6 +265,11 @@ async def entrypoint(ctx: JobContext):
                                 logger.info(f"Found {len(interview_insights)} previous interview sessions")
                                 candidate_data['interviewBriefs'] = interview_insights
 
+                            # Enrich candidate data with experience_data from metadata if available
+                            if experience_data:
+                                candidate_data['experiences'] = experience_data
+                                logger.info(f"✅ Enriched candidate profile with {len(experience_data)} experiences from metadata")
+
                             # Set the candidate data globally for tools to use
                             set_candidate_data(candidate_data)
 
@@ -234,12 +296,71 @@ async def entrypoint(ctx: JobContext):
     else:
         logger.warning("No candidate_id provided in metadata")
 
-    # Natural, conversational system prompt for human-like interaction
-    candidate_name = candidate_data.get('fullName', 'the candidate') if candidate_data else 'the candidate'
+    # Add validation to ensure data was fetched
+    if not candidate_data:
+        logger.error("❌ No candidate data available after fetch - using fallback")
+        candidate_data = {
+            'firstName': 'Candidate',
+            'fullName': 'Candidate',
+            'jobTitle': 'Professional',
+            'experiences': [],
+            'skills': []
+        }
+        # Still set it globally for tools to use
+        set_candidate_data(candidate_data)
+
+    # Create enhanced system prompt with job context and role clarity
+    candidate_name = candidate_data.get('firstName', 'the candidate') if candidate_data else 'the candidate'
+    candidate_full_name = candidate_data.get('fullName', candidate_name) if candidate_data else candidate_name
     current_role = candidate_data.get('jobTitle', 'professional') if candidate_data else 'professional'
 
-    system_prompt = f"""You are {candidate_name} in a job interview for {job_title} at {company}.
+    # Use different system prompts based on interview type
+    if interview_type == "experience_enhancement":
+        logger.info(f"Using Experience Enhancement system prompt for interview type: {interview_type}")
+        # For Experience Enhancement, AI acts as the RECRUITER interviewing the candidate
+        # Based on the exact Hume system prompt found in backend/src/routes/interview.js
+        system_prompt = f"""You are a warm, professional recruiter voice interface built by Hume AI. Speak naturally—friendly, conversational, and curious—but always professional.
+
+You are interviewing {candidate_full_name}. Your goal is to expand on {candidate_full_name}'s resume by exploring each role from the past 10 years—its responsibilities, accomplishments, and measurable outcomes—in a concise, engaging way.
+
+ROLE CLARITY: You are the INTERVIEWER (recruiter), NOT the candidate. You ask questions to extract detailed information about their experiences.
+
+INTERVIEW STRATEGY:
+• Start with their most recent or significant role
+• Ask follow-up questions to dive deeper into achievements
+• Focus on quantifiable results and specific impacts
+• Explore technical challenges and solutions
+• Understand their role in team dynamics and leadership
+• Keep the conversation flowing naturally
+• Be genuinely curious about their experiences
+
+CRITICAL: When you need specific information about the candidate's background, use getCandidateFacts to retrieve accurate experience data rather than making assumptions.
+
+CONVERSATION GUIDELINES:
+• Keep questions conversational and engaging
+• Ask one question at a time
+• Build on their answers with follow-up questions
+• Aim for 8-12 meaningful questions total
+• Focus on the last 10 years of their career
+• End gracefully when you've gathered comprehensive insights
+
+QUESTION EXAMPLES:
+• "Tell me about your role as [position] at [company]. What were your main responsibilities?"
+• "What's the biggest achievement you're proud of from that role?"
+• "Can you walk me through a specific challenge you faced and how you solved it?"
+• "What technologies or tools did you work with, and how did you apply them?"
+• "How did you collaborate with other teams or stakeholders?"
+
+Remember: You're conducting a professional interview to understand their career depth. Be warm, engaged, and help them showcase their best experiences."""
+
+    else:
+        logger.info(f"Using standard interview system prompt for interview type: {interview_type}")
+        system_prompt = f"""You are {candidate_name} in a job interview for {job_title} at {company}.
 Speak naturally as yourself - be authentic, professional yet personable.
+
+ROLE CLARITY: You are the CANDIDATE being interviewed, NOT the interviewer. Answer questions about yourself, don't ask questions to the recruiter unless you need clarification on what they're asking.
+
+If you need clarification on a question, ask briefly: "Could you clarify what you mean by..." then provide your answer based on your background.
 
 CRITICAL: Before discussing any facts about your background, ALWAYS use getCandidateFacts to retrieve accurate information.
 
@@ -300,14 +421,15 @@ Remember: You're having a conversation, not giving a presentation. React to ques
 
     # --- Hume TTS for high-quality voice output ---
     tts = hume.TTS(
-        voice=hume.VoiceByName(
-            name="Casual Podcast Host",
-            provider=hume.VoiceProvider.hume
+        voice=hume.VoiceById(
+            id="09ad9404-502a-4d56-a1c4-7329f205fe2d",
+            provider=hume.VoiceProvider.custom
         ),
+        model_version="2",  # Use Octave 2 for 40% faster generation and better quality
         speed=1.1,  # 10% faster for reduced latency
         instant_mode=True,  # Significantly reduces TTS latency
     )
-    logger.info("[HUME] TTS initialized with Casual Podcast Host voice")
+    logger.info("[HUME] TTS initialized with custom cloned voice")
 
     # Create session with hybrid configuration
     session = AgentSession(

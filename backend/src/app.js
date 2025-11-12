@@ -36,7 +36,9 @@ const app = express();
 const server = createServer(app);
 
 // Enable trust proxy for Railway/production
-app.set('trust proxy', 1);
+// Enable trust proxy for Railway/production deployments
+// This is required when behind a reverse proxy (Railway, Vercel, etc.)
+app.set('trust proxy', true);
 
 // Removed Socket.IO initialization - using direct Hume WebSocket API calls instead
 
@@ -59,7 +61,7 @@ const corsOptions = {
       "http://localhost:8081",
       "http://localhost:3000",
       "http://localhost:5173",
-      process.env.FRONTEND_URL || "http://localhost:8080"
+      ...(process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(',').map(url => url.trim()) : ["http://localhost:8080"])
     ];
 
     // Check if origin is allowed

@@ -27,10 +27,12 @@ export interface EVISessionData {
 }
 
 export interface EVIMessage {
-  type: 'user_message' | 'assistant_message' | 'audio_output' | 'user_interruption' | 'error';
+  type: 'user_message' | 'assistant_message' | 'audio_output' | 'user_interruption' | 'error' | 'tool_call' | 'tool_response';
   content?: string;
   timestamp: string;
   emotions?: any;
+  toolCall?: any;
+  toolResponse?: any;
 }
 
 class DirectHumeEVI {
@@ -54,10 +56,10 @@ class DirectHumeEVI {
   private baseUrl: string;
 
   constructor() {
-    // Use environment variable for API URL - CLEAN ARCHITECTURE
+    // Use environment variable for API URL
     this.baseUrl = `${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/interview`;
-
-    console.log('🎯 DirectHumeEVI SDK initialized with CLEAN baseUrl:', this.baseUrl);
+    
+    console.log('🎯 DirectHumeEVI SDK initialized with baseUrl:', this.baseUrl);
   }
 
   /**
@@ -153,9 +155,8 @@ class DirectHumeEVI {
         configResponse = await fetch(`${this.baseUrl}/create-config`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userId,
-            candidateData: { id: userId }, // Simplified for clean architecture
+          body: JSON.stringify({ 
+            userId, 
             interviewType, 
             jobContext,
             experienceId: jobContext?.experienceId 
@@ -346,7 +347,16 @@ class DirectHumeEVI {
    */
   private async handleVoiceMessage(message: any): Promise<void> {
     console.log('📥 Message:', message.type);
-    
+
+    // 🔍 DEBUG: Log ALL message details to see what Hume is sending
+    if (message.type === 'audio_output') {
+      console.log('🔊 AUDIO OUTPUT MESSAGE:', JSON.stringify(message, null, 2));
+    } else if (message.type === 'assistant_message') {
+      console.log('💬 ASSISTANT MESSAGE:', JSON.stringify(message, null, 2));
+    } else {
+      console.log('📨 Message details:', JSON.stringify(message, null, 2));
+    }
+
     // Log timeout-related events for debugging
     if (message.type === 'timeout_warning' || message.type === 'session_ended') {
       console.log('⏰ Timeout event received:', message.type, message);
@@ -453,8 +463,15 @@ class DirectHumeEVI {
         break;
 
       case 'tool_call':
+      case 'function_call':
         console.log('🔧 Tool call received:', message);
         await this.handleToolCall(message);
+        break;
+
+      case 'tool_response':
+      case 'tool_result':
+        console.log('🔧 Tool response received:', message);
+        this.emit('tool_response', message);
         break;
 
       default:
@@ -467,103 +484,101 @@ class DirectHumeEVI {
    */
   private async handleToolCall(message: any): Promise<void> {
     try {
-      console.log('🔧 Processing tool call:', {
-        toolCallId: message.tool_call_id,
-        name: message.name,
-        parameters: message.parameters
+      console.log('🔧 Processing tool call:', JSON.stringify(message, null, 2));
+
+      // Extract tool call information from message
+      const toolCall = message.tool_call || message.function_call || message;
+      const toolCallId = toolCall.id || toolCall.tool_call_id || message.id;
+      const functionName = toolCall.function?.name || toolCall.name || 'fetch_candidate_info';
+      const parameters = toolCall.function?.arguments || toolCall.arguments || toolCall.parameters;
+
+      console.log('🔧 Tool call details:', {
+        toolCallId,
+        functionName,
+        parameters: typeof parameters === 'string' ? JSON.parse(parameters) : parameters
       });
 
-      // Parse parameters from the tool call
-      const parameters = JSON.parse(message.parameters);
-      console.log('📥 Parsed parameters:', parameters);
+      // Parse parameters if they're a string
+      let parsedParams;
+      try {
+        parsedParams = typeof parameters === 'string' ? JSON.parse(parameters) : parameters;
+      } catch (e) {
+        console.error('❌ Failed to parse tool parameters:', parameters);
+        parsedParams = { question: parameters || 'Unknown question' };
+      }
 
-      // Call backend get-answer endpoint
-      const response = await fetch(`${this.baseUrl}/get-answer`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: parameters.user_id,
-          question: parameters.question
-        })
-      });
+      const question = parsedParams.question || parsedParams.query || 'What can you tell me about this candidate?';
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: 'Backend request failed' }));
-        console.error('❌ Backend get-answer failed:', errorData);
-
-        // Send tool error back to Hume
-        await this.sendToolError(message.tool_call_id, errorData.error || 'Failed to get answer from backend');
+      // Get current session to extract user ID
+      const currentSession = this.getCurrentSession();
+      if (!currentSession) {
+        console.error('❌ No current session for tool call');
         return;
       }
 
-      const answerData = await response.json();
-      console.log('✅ Got answer from backend:', answerData);
+      // Extract user ID from session (assuming it's stored in sessionId or interviewId)
+      const userId = currentSession.sessionId.split('-')[0] || currentSession.interviewId;
 
-      // Send tool response back to Hume
-      await this.sendToolResponse(message.tool_call_id, answerData.answer || answerData.response || 'No answer provided');
+      console.log('🔧 Making tool call request to backend:', {
+        userId,
+        question,
+        toolCallId,
+        endpoint: `${this.baseUrl}/get-answer`
+      });
+
+      // Make HTTP request to backend endpoint
+      const response = await fetch(`${this.baseUrl}/get-answer`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          user_id: userId,
+          question: question,
+          tool_call_id: toolCallId
+        })
+      });
+
+      console.log('🔧 Tool call response status:', response.status);
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Failed to get tool response' }));
+        console.error('❌ Tool call failed:', errorData);
+        return;
+      }
+
+      const responseData = await response.json();
+      console.log('✅ Tool call response:', responseData);
+
+      // Send tool response back to Hume EVI
+      if (this.voiceClient && toolCallId) {
+        const toolResponse = {
+          type: 'tool_response',
+          tool_call_id: toolCallId,
+          content: responseData.answer || responseData.result || 'Tool call completed successfully'
+        };
+
+        console.log('📤 Sending tool response to Hume:', toolResponse);
+
+        // Send the tool response back to Hume using the generic send method
+        try {
+          if (typeof this.voiceClient.send === 'function') {
+            this.voiceClient.send(JSON.stringify(toolResponse));
+          } else if (typeof this.voiceClient.sendMessage === 'function') {
+            this.voiceClient.sendMessage(toolResponse);
+          } else {
+            console.error('❌ No suitable send method found on VoiceClient');
+          }
+        } catch (sendError) {
+          console.error('❌ Error sending tool response:', sendError);
+        }
+      }
+
+      this.emit('tool_call_completed', { toolCallId, response: responseData });
 
     } catch (error) {
       console.error('❌ Error handling tool call:', error);
-      await this.sendToolError(message.tool_call_id, `Tool call failed: ${error.message}`);
-    }
-  }
-
-  /**
-   * Send tool response back to Hume EVI
-   */
-  private async sendToolResponse(toolCallId: string, content: string): Promise<void> {
-    if (!this.voiceClient) {
-      console.error('❌ Cannot send tool response: no voice client');
-      return;
-    }
-
-    try {
-      const toolResponse = {
-        type: 'tool_response',
-        tool_call_id: toolCallId,
-        content: content
-      };
-
-      console.log('📤 Sending tool response:', toolResponse);
-
-      // Use the voice client's sendToolMessage method
-      await this.voiceClient.sendToolMessage(toolResponse);
-      console.log('✅ Tool response sent successfully');
-
-    } catch (error) {
-      console.error('❌ Error sending tool response:', error);
-      // Try to send an error message instead
-      await this.sendToolError(toolCallId, 'Failed to send tool response');
-    }
-  }
-
-  /**
-   * Send tool error back to Hume EVI
-   */
-  private async sendToolError(toolCallId: string, errorMessage: string): Promise<void> {
-    if (!this.voiceClient) {
-      console.error('❌ Cannot send tool error: no voice client');
-      return;
-    }
-
-    try {
-      const toolError = {
-        type: 'tool_error',
-        tool_call_id: toolCallId,
-        error: errorMessage,
-        code: 'TOOL_EXECUTION_ERROR',
-        level: 'error',
-        content: `I apologize, but I encountered an error: ${errorMessage}`
-      };
-
-      console.log('📤 Sending tool error:', toolError);
-
-      // Use the voice client's sendToolMessage method
-      await this.voiceClient.sendToolMessage(toolError);
-      console.log('✅ Tool error sent successfully');
-
-    } catch (error) {
-      console.error('❌ Error sending tool error:', error);
+      this.emit('tool_call_error', { error, message });
     }
   }
 

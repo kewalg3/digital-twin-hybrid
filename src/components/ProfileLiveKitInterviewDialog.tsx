@@ -26,6 +26,9 @@ interface ProfileVoiceInterviewDialogProps {
   candidateId: string;
   candidateName: string;
   candidateData: any; // Will contain all user profile data
+  interviewType?: string; // "experience_enhancement" | "general"
+  experienceData?: any; // Experience data for experience enhancement interviews
+  onInterviewComplete?: () => void; // Optional callback when interview is completed
 }
 
 type InterviewStage = 'initial' | 'recording' | 'saving' | 'processing' | 'brief';
@@ -35,7 +38,10 @@ export default function ProfileLiveKitInterviewDialog({
   onClose,
   candidateId,
   candidateName,
-  candidateData
+  candidateData,
+  interviewType = "general",
+  experienceData = null,
+  onInterviewComplete
 }: ProfileVoiceInterviewDialogProps) {
   const [stage, setStage] = useState<InterviewStage>('initial');
   const [isRecording, setIsRecording] = useState(false);
@@ -141,12 +147,7 @@ export default function ProfileLiveKitInterviewDialog({
     }
   };
 
-  // Auto-scroll to bottom when transcript changes
-  useEffect(() => {
-    if (transcriptContainerRef.current) {
-      transcriptContainerRef.current.scrollTop = transcriptContainerRef.current.scrollHeight;
-    }
-  }, [transcript]);
+  // Note: Auto-scroll moved to LiveKitRoomContent where transcript updates happen
 
   // Timer effect for recording
   useEffect(() => {
@@ -197,12 +198,14 @@ export default function ProfileLiveKitInterviewDialog({
         jobDescription: recruiterContext.jobDescription || 'Screening interview for ' + candidateName
       });
 
-      // Call the LiveKit backend endpoint to start the interview (public endpoint - no auth required)
+      // Call the LiveKit backend endpoint to start the interview
+      // Get auth token from localStorage in case it's needed
+      const token = localStorage.getItem('token');
       const response = await fetch(`${import.meta.env.VITE_API_URL}/interviews/start`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
-          // No Authorization header - public endpoint
+          'Content-Type': 'application/json',
+          ...(token && { 'Authorization': `Bearer ${token}` })
         },
         body: JSON.stringify({
           candidateId: candidateId,
@@ -213,7 +216,9 @@ export default function ProfileLiveKitInterviewDialog({
           recruiterPhone: recruiterContext.recruiterPhone,
           company: recruiterContext.company,
           jobTitle: recruiterContext.position,
-          jobDescription: recruiterContext.jobDescription || 'Screening interview for ' + candidateName
+          jobDescription: recruiterContext.jobDescription || 'Screening interview for ' + candidateName,
+          interviewType: interviewType, // Pass interview type to backend
+          experienceData: experienceData // Pass experience data for experience enhancement interviews
         })
       });
 
@@ -300,7 +305,9 @@ export default function ProfileLiveKitInterviewDialog({
             candidateId: candidateId,
             recruiterId: recruiterId, // Link to recruiter if available
             transcript: transcriptForBackend,
-            duration: currentTime
+            duration: currentTime,
+            interviewType: interviewType, // Pass interview type for proper processing
+            experienceData: experienceData // Pass experience data for context
           })
         });
         
@@ -320,12 +327,22 @@ export default function ProfileLiveKitInterviewDialog({
       
       setTranscript(finalTranscript);
       setStage('brief');
-      
+
+      // Call completion callback if provided
+      if (onInterviewComplete) {
+        onInterviewComplete();
+      }
+
     } catch (error) {
       console.error('❌ Error completing interview:', error);
       // Still transition to brief stage even if there's an error
       setTranscript(transcript);
       setStage('brief');
+
+      // Call completion callback even if there's an error
+      if (onInterviewComplete) {
+        onInterviewComplete();
+      }
     }
   };
 
@@ -396,36 +413,9 @@ export default function ProfileLiveKitInterviewDialog({
         <div>
           <h3 className="text-2xl font-bold mb-2">Talk to {candidateName}'s Digital Twin</h3>
           <p className="text-lg text-muted-foreground">{candidateData.jobTitle || 'Professional'} • {candidateData.location || 'Remote'}</p>
-          <p className="text-sm text-muted-foreground mt-2">AI-powered professional avatar</p>
         </div>
       </div>
 
-      <Card className="p-6 bg-gradient-to-br from-primary/5 to-blue-500/5 border-primary/20">
-        <div className="space-y-4">
-          <div className="flex items-center gap-2 justify-center">
-            <Volume2 className="w-5 h-5 text-primary" />
-            <h4 className="font-semibold text-primary">Digital Twin Technology</h4>
-          </div>
-          <ul className="text-sm text-muted-foreground space-y-2">
-            <li className="flex items-center gap-2">
-              <div className="w-2 h-2 bg-primary rounded-full"></div>
-              <span>Speaks as {candidateName.split(' ')[0]} with their actual experience</span>
-            </li>
-            <li className="flex items-center gap-2">
-              <div className="w-2 h-2 bg-primary rounded-full"></div>
-              <span>Answers based on real resume and interview data</span>
-            </li>
-            <li className="flex items-center gap-2">
-              <div className="w-2 h-2 bg-primary rounded-full"></div>
-              <span>Natural conversation with no time limits</span>
-            </li>
-            <li className="flex items-center gap-2">
-              <div className="w-2 h-2 bg-primary rounded-full"></div>
-              <span>Perfect for initial screening and assessment</span>
-            </li>
-          </ul>
-        </div>
-      </Card>
 
       {/* Recruiter Context Form */}
       <Collapsible open={isContextOpen} onOpenChange={setIsContextOpen}>
@@ -579,6 +569,13 @@ export default function ProfileLiveKitInterviewDialog({
     const participants = useParticipants();
     const tracks = useTracks();
 
+    // Auto-scroll to bottom when transcript changes
+    useEffect(() => {
+      if (transcriptContainerRef.current) {
+        transcriptContainerRef.current.scrollTop = transcriptContainerRef.current.scrollHeight;
+      }
+    }, [transcript]);
+
     // Handle transcription events
     useEffect(() => {
       if (!room) return;
@@ -651,6 +648,14 @@ export default function ProfileLiveKitInterviewDialog({
         console.log('🤖 Agent in room:', agentParticipant.identity);
         setAiIsSpeaking(agentParticipant.isSpeaking);
 
+        // Immediately transition to recording when agent is detected
+        if (stage === 'recording' && isConnecting) {
+          console.log('✅ Agent detected! Transitioning to recording mode');
+          setIsConnecting(false);
+          setIsRecording(true);
+          setIsListening(true);
+        }
+
         // Check for transcription tracks
         const remotePart = agentParticipant as RemoteParticipant;
         if (remotePart.audioTracks) {
@@ -664,7 +669,7 @@ export default function ProfileLiveKitInterviewDialog({
       participants.forEach(participant => {
         console.log('👤 Participant:', participant.identity, 'Speaking:', participant.isSpeaking);
       });
-    }, [participants]);
+    }, [participants, stage, isConnecting]);
 
     // Monitor tracks for debugging
     useEffect(() => {
@@ -680,6 +685,17 @@ export default function ProfileLiveKitInterviewDialog({
       if (!room) return;
 
       console.log('✅ Connected to LiveKit room');
+
+      // Add timeout fallback for agent connection (10 seconds)
+      const connectionTimeout = setTimeout(() => {
+        if (isConnecting) {
+          console.warn('⏰ Agent connection timeout - clearing connecting state');
+          setIsConnecting(false);
+          setIsRecording(true);
+          setIsListening(true);
+          setError('Agent connected but may be slow to respond. You can continue talking.');
+        }
+      }, 10000);
 
       // Listen for speaking changes
       const handleSpeakingChanged = (speaking: boolean, participant: Participant) => {
@@ -705,15 +721,8 @@ export default function ProfileLiveKitInterviewDialog({
           const text = new TextDecoder().decode(payload);
           console.log('📨 Data received:', text, 'from:', participant?.identity);
 
-          // Add as transcript
-          if (text && text.trim()) {
-            const transcriptMessage: LiveKitMessage = {
-              type: participant?.identity?.includes('agent') ? 'assistant_message' : 'user_message',
-              content: text,
-              timestamp: new Date().toISOString()
-            };
-            setTranscript(prev => [...prev, transcriptMessage]);
-          }
+          // Skip adding transcript here - handled by useDataChannel hook to avoid duplicates
+          // The useDataChannel hook above already handles this
         } catch (e) {
           console.error('Error processing data:', e);
         }
@@ -722,8 +731,13 @@ export default function ProfileLiveKitInterviewDialog({
       room.on('participantConnected', (participant) => {
         console.log('👤 Participant connected:', participant.identity);
 
-        // Subscribe to participant's data
-        if (participant.identity.includes('agent')) {
+        // Subscribe to participant's data - check for multiple possible agent identity formats
+        const isAgent = participant.identity.includes('agent') ||
+                        participant.identity.includes('my-agent') ||
+                        participant.identity.startsWith('AW_') ||
+                        participant.identity.toLowerCase().includes('assistant');
+
+        if (isAgent) {
           console.log('🤖 Agent connected, subscribing to data...');
           // Agent is now connected, start the interview
           setIsConnecting(false);
@@ -747,6 +761,7 @@ export default function ProfileLiveKitInterviewDialog({
       }
 
       return () => {
+        clearTimeout(connectionTimeout);
         if (room) {
           room.off('isSpeakingChanged', handleSpeakingChanged);
           room.off('trackSubscribed', handleTrackSubscribed);
@@ -769,7 +784,7 @@ export default function ProfileLiveKitInterviewDialog({
                 </div>
               </div>
               <div className="space-y-2">
-                <h3 className="text-xl font-semibold">Connecting to AI Agent...</h3>
+                <h3 className="text-xl font-semibold">Connecting...</h3>
                 <p className="text-muted-foreground">Please wait while we set up your interview</p>
               </div>
             </div>
@@ -805,7 +820,7 @@ export default function ProfileLiveKitInterviewDialog({
               <div className="space-y-2">
                 <h3 className="text-xl font-semibold">
                   {aiIsSpeaking
-                    ? "AI is Speaking"
+                    ? `${candidateName.split(' ')[0]} is Speaking`
                     : isListening
                     ? "Listening..."
                     : "Ready"}

@@ -134,7 +134,9 @@ export const resumeApi = {
     console.log('🌐 API baseURL:', api.defaults.baseURL);
     
     try {
-      const response = await api.post('/resumes/upload', formData);
+      const response = await api.post('/resumes/upload', formData, {
+        timeout: 120000  // 2 minutes for resume uploads only
+      });
       console.log('✅ Upload response received:', response);
       return response.data;
     } catch (error) {

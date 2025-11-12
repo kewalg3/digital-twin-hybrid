@@ -5,6 +5,8 @@ const prisma = new PrismaClient();
 
 const authMiddleware = async (req, res, next) => {
   console.log('🔐 Auth middleware hit for:', req.method, req.path);
+  console.log('🔐 Full URL:', req.originalUrl);
+  console.log('🔐 Base URL:', req.baseUrl);
   console.log('🔐 Authorization header:', req.headers.authorization ? 'Present' : 'Missing');
   
   try {

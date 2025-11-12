@@ -1,4 +1,9 @@
-import { useState, useEffect, useRef } from "react";
+// ============================================================================
+// FILE: ProfileVoiceInterviewDialog.tsx
+// ZERO HALLUCINATION PROFILE INTERVIEW - Complete Implementation
+// ============================================================================
+
+import React, { useState, useEffect, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -10,151 +15,403 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Mic, MicOff, Play, Pause, FileText, Clock, Target, TrendingUp, User, Volume2, StopCircle, ChevronDown, Building, Briefcase, AlertCircle } from "lucide-react";
-import { directHumeEVI, type EVIMessage } from "@/services/directHumeEVISDK";
+import { directHumeEVI } from "@/services/directHumeEVISDK";
+import type { EVISessionData, EVIMessage } from "@/services/directHumeEVISDK";
 
 interface ProfileVoiceInterviewDialogProps {
   isOpen: boolean;
   onClose: () => void;
   candidateId: string;
-  candidateName: string;
-  candidateData: any; // Will contain all user profile data
+  candidateName?: string;
+  recruiterName?: string;
+  company?: string;
+  position?: string;
+  candidateData?: any;
 }
 
-type InterviewStage = 'initial' | 'recording' | 'brief' | 'processing';
+type InterviewStage = 'initial' | 'loading_config' | 'ready' | 'recording' | 'saving' | 'processing' | 'brief';
 
-export default function ProfileVoiceInterviewDialog({ 
-  isOpen, 
-  onClose, 
-  candidateId, 
-  candidateName, 
-  candidateData 
+export default function ProfileVoiceInterviewDialog({
+  isOpen,
+  onClose,
+  candidateId,
+  candidateName,
+  recruiterName,
+  company,
+  position,
+  candidateData
 }: ProfileVoiceInterviewDialogProps) {
+  // ============================================================================
+  // HOOKS & STATE
+  // ============================================================================
+
+  // Using directHumeEVI service like WorkStyle interviews
   const [stage, setStage] = useState<InterviewStage>('initial');
+  const [configId, setConfigId] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [isLoadingConfig, setIsLoadingConfig] = useState(false);
+  const [configError, setConfigError] = useState<string | null>(null);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected');
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState<EVIMessage[]>([]);
-  const [showTranscriptDialog, setShowTranscriptDialog] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [isContextOpen, setIsContextOpen] = useState(false);
-  const [isConnecting, setIsConnecting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [aiIsSpeaking, setAiIsSpeaking] = useState(false);
-  const [isListening, setIsListening] = useState(false);
-  const [interviewSummary, setInterviewSummary] = useState<any | null>(null);
-  const [completedSessionId, setCompletedSessionId] = useState<string | null>(null);
-  const [fullTranscriptFromDB, setFullTranscriptFromDB] = useState<EVIMessage[] | null>(null);
-  const interviewTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const messageHandlersSetup = useRef<boolean>(false);
-  const transcriptContainerRef = useRef<HTMLDivElement>(null);
-  
-  // Recruiter context state
+  const [isAIPlaying, setIsAIPlaying] = useState(false);
+  const [currentSession, setCurrentSession] = useState<EVISessionData | null>(null);
+
+  // Recruiter context state - copied from LiveKit dialog
   const [recruiterContext, setRecruiterContext] = useState({
     recruiterName: "",
+    recruiterEmail: "",
     recruiterTitle: "",
+    recruiterLinkedin: "",
+    recruiterPhone: "",
     company: "",
     position: "",
     jobDescription: ""
   });
 
-  // Helper function to get initials from full name
-  const getInitials = (fullName: string): string => {
-    if (!fullName) return '';
-    
-    const parts = fullName.trim().split(' ').filter(part => part.length > 0);
-    if (parts.length === 0) return '';
-    
-    const firstInitial = parts[0].charAt(0).toUpperCase();
-    const lastInitial = parts.length > 1 ? parts[parts.length - 1].charAt(0).toUpperCase() : '';
-    
-    return firstInitial + lastInitial;
-  };
+  // UI state for collapsible recruiter form
+  const [isContextOpen, setIsContextOpen] = useState(false);
 
-  // Cleanup on component unmount only
+  // Refs for auto-scroll functionality
+  const transcriptContainerRef = useRef<HTMLDivElement>(null);
+
+  // Interview completion workflow state (copied from LiveKit dialog)
+  const [interviewSummary, setInterviewSummary] = useState<any | null>(null);
+  const [completedSessionId, setCompletedSessionId] = useState<string | null>(null);
+  const [fullTranscriptFromDB, setFullTranscriptFromDB] = useState<EVIMessage[] | null>(null);
+  const [showTranscriptDialog, setShowTranscriptDialog] = useState(false);
+
+  // ============================================================================
+  // STEP 1: Create Zero-Hallucination Config on Component Mount
+  // ============================================================================
+
   useEffect(() => {
-    return () => {
-      // Final cleanup on unmount
-      if (interviewTimerRef.current) {
-        clearInterval(interviewTimerRef.current);
-        interviewTimerRef.current = null;
-      }
-      messageHandlersSetup.current = false;
-    };
-  }, []);
+    if (!isOpen || !candidateId) return;
 
-  // Setup Hume event handlers
-  const setupDirectEVIMessageHandlers = () => {
-    if (messageHandlersSetup.current) {
-      console.log('⚠️ Message handlers already set up');
-      return;
-    }
-    
-    console.log('🔧 Setting up DIRECT EVI message handlers...');
-    messageHandlersSetup.current = true;
-    
-    directHumeEVI.onMessage('connected', async () => {
-      console.log('✅ Connected to Hume EVI');
-      setError(null);
-      
-      // Auto-start recording when connected
+    async function createConfig() {
       try {
-        await directHumeEVI.startRecording();
-        setIsRecording(true);
-        setIsListening(true);
-        console.log('✅ Recording started automatically');
+        setIsLoadingConfig(true);
+        setConfigError(null);
+        setStage('loading_config');
+
+        console.log('🔧 Creating zero-hallucination profile config for:', candidateId);
+
+        const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/interview/create-profile-config`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            candidateId,
+            candidateName,
+            recruiterName: recruiterContext.recruiterName || recruiterName,
+            recruiterEmail: recruiterContext.recruiterEmail,
+            recruiterTitle: recruiterContext.recruiterTitle,
+            recruiterLinkedin: recruiterContext.recruiterLinkedin,
+            recruiterPhone: recruiterContext.recruiterPhone,
+            company: recruiterContext.company || company,
+            position: recruiterContext.position || position,
+            jobDescription: recruiterContext.jobDescription
+          })
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || `Failed to create config: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        console.log('✅ Zero-hallucination config created:', data.configId);
+
+        setConfigId(data.configId);
+        setSessionId(data.sessionId);
+        setStage('ready');
+
       } catch (error) {
-        console.error('❌ Failed to start recording:', error);
-        setError('Failed to start audio recording. Please check microphone permissions.');
+        console.error('❌ Error creating config:', error);
+        setConfigError(error instanceof Error ? error.message : 'Failed to create config');
+        setStage('initial');
+      } finally {
+        setIsLoadingConfig(false);
       }
+    }
+
+    createConfig();
+  }, [isOpen, candidateId, candidateName, recruiterName, company, position]);
+
+  // ============================================================================
+  // STEP 2: Setup Message Handlers (Like WorkStyle)
+  // ============================================================================
+
+  const setupMessageHandlers = () => {
+    console.log('🎯 Setting up message handlers for Profile interview');
+
+    directHumeEVI.onMessage('user_message', (message: any) => {
+      console.log('👤 User message received:', message);
+      setTranscript(prev => [...prev, {
+        type: 'user_message',
+        content: message.message?.content || '',
+        timestamp: new Date().toISOString()
+      }]);
     });
 
     directHumeEVI.onMessage('assistant_message', (message: any) => {
-      console.log('🤖 Assistant message:', message);
-      const transcriptEntry = {
-        type: 'assistant_message' as const,
+      console.log('🤖 Assistant message received:', message);
+      setTranscript(prev => [...prev, {
+        type: 'assistant_message',
         content: message.message?.content || '',
         timestamp: new Date().toISOString()
-      };
-      console.log('📝 Adding to transcript:', transcriptEntry);
-      setTranscript(prev => {
-        const newTranscript = [...prev, transcriptEntry];
-        console.log('📋 Updated transcript length:', newTranscript.length);
-        return newTranscript;
-      });
-    });
-
-    directHumeEVI.onMessage('user_message', (message: any) => {
-      console.log('👤 User message:', message);
-      const transcriptEntry = {
-        type: 'user_message' as const,
-        content: message.message?.content || '',
-        timestamp: new Date().toISOString()
-      };
-      console.log('📝 Adding to transcript:', transcriptEntry);
-      setTranscript(prev => {
-        const newTranscript = [...prev, transcriptEntry];
-        console.log('📋 Updated transcript length:', newTranscript.length);
-        return newTranscript;
-      });
+      }]);
     });
 
     directHumeEVI.onMessage('audio_start', () => {
-      console.log('🎵 AI audio playback started');
-      setAiIsSpeaking(true);
+      setIsAIPlaying(true);
     });
 
     directHumeEVI.onMessage('audio_end', () => {
-      console.log('🎵 AI audio playback ended');
-      setAiIsSpeaking(false);
+      setIsAIPlaying(false);
     });
 
-    directHumeEVI.onMessage('error', (error: any) => {
-      console.error('❌ Hume error:', error);
-      setError('Connection error. Please try again.');
+    directHumeEVI.onMessage('connected', async () => {
+      console.log('✅ Profile EVI connected');
+      setConnectionStatus('connected');
+      setStage('recording');
+
+      // Start recording automatically when connection is ready (like WorkStyle)
+      try {
+        await directHumeEVI.startRecording();
+        setIsRecording(true);
+        console.log('✅ Recording started automatically for Profile interview');
+      } catch (error) {
+        console.error('❌ Failed to start recording:', error);
+      }
     });
 
     directHumeEVI.onMessage('disconnected', () => {
-      console.log('🔌 Disconnected from Hume');
+      console.log('🔌 Profile EVI disconnected');
+      setConnectionStatus('disconnected');
     });
+
+    directHumeEVI.onMessage('error', (error: any) => {
+      console.error('❌ Profile interview error:', error);
+      setError(error.message || 'An error occurred during the interview');
+      setConnectionStatus('error');
+    });
+  };
+
+  // ============================================================================
+  // STEP 3: Interview Control Functions
+  // ============================================================================
+
+  const handleStartInterview = async () => {
+    console.log('🚀 PROFILE INTERVIEW: handleStartInterview called!');
+    console.log('🔍 Current state:', { configId, sessionId, candidateId });
+
+    if (!configId || !sessionId) {
+      console.error('❌ No config ID or session ID available');
+      console.error('❌ Debug values:', { configId, sessionId });
+      setError('Configuration not ready. Please wait.');
+      return;
+    }
+
+    try {
+      setError(null);
+      setStage('connecting');
+      setConnectionStatus('connecting');
+
+      console.log('🚀 Starting Profile interview with directHumeEVI...');
+      console.log('📋 Connection details:');
+      console.log('  - Config ID:', configId);
+      console.log('  - Session ID:', sessionId);
+      console.log('  - Candidate ID:', candidateId);
+
+      // First, get access token for this session
+      console.log('🔑 Getting access token...');
+      const tokenResponse = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/interview/get-token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId })
+      });
+
+      if (!tokenResponse.ok) {
+        const tokenError = await tokenResponse.json().catch(() => ({ error: 'Failed to get access token' }));
+        throw new Error(tokenError.error || 'Failed to get access token');
+      }
+
+      const { accessToken } = await tokenResponse.json();
+      console.log('✅ Access token received');
+
+      // Setup message handlers first
+      setupMessageHandlers();
+
+      // Connect using directHumeEVI like WorkStyle interviews
+      console.log('🔌 Connecting to existing EVI config...');
+      const session = await directHumeEVI.connectToExistingConfig(
+        configId,
+        accessToken,
+        sessionId,
+        candidateId // Pass candidateId for context
+      );
+
+      setCurrentSession(session);
+      console.log('✅ Connected to Profile EVI successfully');
+
+    } catch (error) {
+      console.error('❌ Failed to start Profile interview:', error);
+      setError(error instanceof Error ? error.message : 'Failed to start interview');
+      setStage('ready');
+      setConnectionStatus('error');
+    }
+  };
+
+  const handleCompleteInterview = async () => {
+    // Prevent double clicks and ensure we're in the right state
+    if (stage !== 'recording' || transcript.length === 0) {
+      console.log('⚠️ Cannot complete interview - wrong stage or no transcript');
+      return;
+    }
+
+    try {
+      // First show saving state while collecting final transcripts
+      setStage('saving');
+
+      console.log('⏳ Waiting for final transcripts...');
+
+      // Wait 3-5 seconds for final transcripts to arrive
+      await new Promise(resolve => setTimeout(resolve, 4000));
+
+      // Now move to processing stage
+      setStage('processing');
+      setIsRecording(false);
+
+      console.log('🏁 Ending Hume EVI interview...');
+      console.log('📝 Final transcript length:', transcript.length);
+
+      let finalTranscript = transcript;
+      let finalSessionId = sessionId;
+
+      // Save transcript and generate highlights
+      if (finalSessionId) {
+        console.log('🔄 Saving Hume EVI interview transcript...');
+
+        // Transform transcript to backend format
+        const transcriptForBackend = finalTranscript.map(msg => ({
+          type: msg.type === 'assistant_message' ? 'assistant' : 'user',
+          content: msg.content,
+          timestamp: new Date(msg.timestamp).toISOString()
+        }));
+
+        // Save to EVI interview sessions table and generate highlights
+        const saveResponse = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/interview/complete-evi-interview`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: finalSessionId,
+            candidateId: candidateId,
+            transcript: transcriptForBackend,
+            duration: currentTime,
+            recruiterContext: recruiterContext
+          })
+        });
+
+        if (saveResponse.ok) {
+          const result = await saveResponse.json();
+          console.log('✅ Transcript saved and highlights generated:', result);
+          setInterviewSummary(result);
+          setCompletedSessionId(finalSessionId);
+        } else {
+          console.warn('⚠️ Failed to save transcript to backend');
+          const errorText = await saveResponse.text();
+          console.error('Error response:', errorText);
+        }
+      }
+
+      // End interview using directHumeEVI
+      await directHumeEVI.endInterview(sessionId, transcript);
+      console.log('📋 Profile interview ended successfully');
+
+      setTranscript(finalTranscript);
+      setStage('brief');
+
+    } catch (error) {
+      console.error('❌ Error completing interview:', error);
+      // Still transition to brief stage even if there's an error
+      setTranscript(transcript);
+      setStage('brief');
+    }
+  };
+
+  // Keep the old function for backwards compatibility
+  const handleEndInterview = handleCompleteInterview;
+
+  // ============================================================================
+  // STEP 4: Timer Effect & Connection Status Monitoring
+  // ============================================================================
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (stage === 'recording') {
+      interval = setInterval(() => {
+        setCurrentTime(prev => prev + 1);
+      }, 1000);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [stage]);
+
+  // Monitor connection status changes for debugging (using directHumeEVI)
+  useEffect(() => {
+    console.log('🔄 Connection status changed:', connectionStatus);
+    if (connectionStatus === 'error') {
+      console.error('🚨 Profile EVI entered error state');
+      console.error('🔍 Check config ID and access token validity');
+    }
+    if (connectionStatus === 'connected') {
+      console.log('🎉 Successfully connected to Profile EVI!');
+      console.log('🎤 Audio should now be active');
+    }
+    if (connectionStatus === 'connecting') {
+      console.log('⏳ Establishing Profile EVI connection...');
+    }
+    if (connectionStatus === 'disconnected') {
+      console.log('📤 Disconnected from Profile EVI');
+    }
+  }, [connectionStatus, configId]);
+
+  // ============================================================================
+  // STEP 5: Helper Functions & Auto-scroll
+  // ============================================================================
+
+  // Auto-scroll transcript to bottom (copied from LiveKit dialog)
+  useEffect(() => {
+    if (transcriptContainerRef.current) {
+      transcriptContainerRef.current.scrollTop = transcriptContainerRef.current.scrollHeight;
+    }
+  }, [transcript]);
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // Helper function to update recruiter context (copied from LiveKit dialog)
+  const updateRecruiterContext = (field: keyof typeof recruiterContext, value: string) => {
+    setRecruiterContext(prev => ({ ...prev, [field]: value }));
+  };
+
+  // Helper function to get initials from full name (copied from LiveKit dialog)
+  const getInitials = (fullName: string): string => {
+    if (!fullName) return '';
+
+    const parts = fullName.trim().split(' ').filter(part => part.length > 0);
+    if (parts.length === 0) return '';
+
+    const firstInitial = parts[0].charAt(0).toUpperCase();
+    const lastInitial = parts.length > 1 ? parts[parts.length - 1].charAt(0).toUpperCase() : '';
+
+    return firstInitial + lastInitial;
   };
 
   // Fetch full transcript from database when transcript dialog opens
@@ -166,682 +423,503 @@ export default function ProfileVoiceInterviewDialog({
 
     try {
       console.log('📄 Fetching full transcript from database for session:', completedSessionId);
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/evi-interviews/session/${completedSessionId}`);
-      
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/interview/evi-session/${completedSessionId}`);
+
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
       const sessionData = await response.json();
       console.log('✅ Full session data retrieved:', sessionData);
-      
-      // Use the full transcript from the database if available
-      if (sessionData.data && sessionData.data.fullTranscript) {
-        setFullTranscriptFromDB(sessionData.data.fullTranscript);
+
+      // EVI sessions store transcript as array of {type, content, timestamp}
+      if (sessionData.data && sessionData.data.transcript) {
+        // Transform backend format to frontend format
+        const transformedTranscript = sessionData.data.transcript.map((entry: any) => ({
+          type: entry.type === 'assistant' ? 'assistant_message' : 'user_message',
+          content: entry.content,
+          timestamp: new Date(entry.timestamp).toISOString()
+        }));
+        setFullTranscriptFromDB(transformedTranscript);
+        console.log('✅ Transformed transcript:', transformedTranscript);
       } else {
-        console.warn('⚠️ No fullTranscript found in session data');
+        console.warn('⚠️ No transcript found in session data');
       }
-      
+
     } catch (error) {
       console.error('❌ Error fetching full transcript:', error);
     }
   };
 
-  // Auto-scroll to bottom when transcript changes
-  useEffect(() => {
-    if (transcriptContainerRef.current) {
-      transcriptContainerRef.current.scrollTop = transcriptContainerRef.current.scrollHeight;
-    }
-  }, [transcript]);
-
-  // Timer effect for recording
-  useEffect(() => {
-    if (isRecording && stage === 'recording') {
-      interviewTimerRef.current = setInterval(() => {
-        setCurrentTime(prev => prev + 1);
-      }, 1000);
-    } else if (interviewTimerRef.current) {
-      clearInterval(interviewTimerRef.current);
-      interviewTimerRef.current = null;
-    }
-    return () => {
-      if (interviewTimerRef.current) {
-        clearInterval(interviewTimerRef.current);
-      }
-    };
-  }, [isRecording, stage]);
-
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  const handleStartInterview = async () => {
-    // Prevent multiple simultaneous starts
-    if (isConnecting) {
-      console.log('⚠️ Interview already starting');
-      return;
-    }
-
-    setIsConnecting(true);
-    setError(null);
-
-    // Clean up any existing connection first
-    if (directHumeEVI.isConnectedAndReady()) {
-      console.log('🧹 Cleaning up existing connection before starting new interview');
-      directHumeEVI.cleanup();
-    }
-
-    try {
-      // Create interview context for profile screening
-      console.log('🎯 Starting profile screening interview...');
-      console.log('Candidate data:', candidateData);
-      console.log('Recruiter context:', recruiterContext);
-
-      // Use startInterview method (creates new config each time)
-      const profileContext = {
-        title: 'Profile Screening',
-        company: candidateData?.company || 'Company',
-        duration: '',
-        location: candidateData?.location || '',
-        description: `Profile screening for ${candidateName}`,
-        skills: candidateData?.skills || [],
-        software: candidateData?.software || [],
-        experienceId: `profile-screening-${Date.now()}`, // Unique ID for each screening
-        candidateData,
-        recruiterContext
-      };
-
-      console.log('🚀 Starting profile interview with context:', profileContext);
-
-      // Use the standard startInterview method (creates new config each time)
-      const session = await directHumeEVI.startInterview(
-        candidateId, // Use candidateId as userId for this interview
-        'profile_screening' as any, // Add profile_screening as interview type
-        profileContext
-      );
-
-      setSessionId(session.sessionId);
-
-      // Set up message handlers AFTER successful connection
-      setupDirectEVIMessageHandlers();
-
-      // Recording will be started automatically in the 'connected' event handler
-      
-      setStage('recording');
-      setTranscript([]);
-      setCurrentTime(0);
-      setIsConnecting(false);
-      
-    } catch (error) {
-      console.error('❌ Failed to start interview:', error);
-      setError(error instanceof Error ? error.message : 'Failed to start interview');
-      setIsConnecting(false);
+  const getStatusDisplay = () => {
+    switch (connectionStatus) {
+      case 'connected': return { text: 'Connected', color: 'text-green-600' };
+      case 'connecting': return { text: 'Connecting', color: 'text-yellow-600' };
+      case 'disconnected': return { text: 'Disconnected', color: 'text-gray-600' };
+      case 'error': return { text: 'Error', color: 'text-red-600' };
+      default: return { text: 'Ready', color: 'text-blue-600' };
     }
   };
 
-  const handleCompleteInterview = async () => {
-    try {
-      setStage('processing');
-      setIsRecording(false);
-      
-      // Get current transcript before ending
-      const currentTranscript = directHumeEVI.getTranscript();
-      console.log('📜 Current transcript from directHumeEVI:', currentTranscript);
-      console.log('📜 State transcript:', transcript);
-      
-      // Use state transcript if directHumeEVI transcript is empty
-      const transcriptToUse = currentTranscript.length > 0 ? currentTranscript : transcript;
-      
-      // End the Hume interview
-      console.log('🏁 Ending interview...');
-      console.log('📝 Using transcript with length:', transcriptToUse.length);
-      let finalTranscript = transcriptToUse;
-      let finalSessionId = sessionId;
-      
-      try {
-        const result = await directHumeEVI.endInterview(sessionId || undefined, transcriptToUse);
-        finalTranscript = result.transcript.length > 0 ? result.transcript : transcriptToUse;
-        finalSessionId = result.sessionId || sessionId;
-      } catch (endError) {
-        console.warn('⚠️ Error ending Hume session, but continuing:', endError);
-      }
-      
-      // Save transcript to backend and get insights
-      if (finalSessionId) {
-        console.log('🔄 Saving profile screening transcript...');
-        console.log('📝 Transcript to save:', finalTranscript);
-        console.log('📝 Session ID:', finalSessionId);
-        console.log('📝 Transcript length:', finalTranscript.length);
-        
-        const saveResponse = await fetch(`${import.meta.env.VITE_API_URL}/evi-interview/save-profile-transcript`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            sessionId: finalSessionId,
-            transcript: finalTranscript,
-            endTime: new Date().toISOString(),
-            totalDurationSeconds: currentTime,
-            recruiterNotes: '' // Can be added later
-          })
-        });
-        
-        if (saveResponse.ok) {
-          const result = await saveResponse.json();
-          console.log('✅ Transcript saved and insights extracted');
-          setInterviewSummary(result.insights);
-          // Set the completed session ID for transcript retrieval
-          setCompletedSessionId(finalSessionId);
-        } else {
-          console.warn('⚠️ Failed to save transcript to backend');
-        }
-      }
-      
-      setTranscript(finalTranscript);
-      setStage('brief');
-      
-    } catch (error) {
-      console.error('❌ Error completing interview:', error);
-      // Still transition to brief stage even if there's an error
-      setTranscript(directHumeEVI.getTranscript());
-      setStage('brief');
-    }
-  };
+  // ============================================================================
+  // STEP 6: Render UI
+  // ============================================================================
 
-  const handleClose = async () => {
-    // Stop recording if active
-    if (isRecording) {
-      try {
-        directHumeEVI.stopRecording();
-      } catch (e) {
-        console.error('Error stopping recording:', e);
-      }
-    }
+  if (!isOpen) return null;
 
-    // End interview if still active
-    if (directHumeEVI.isConnectedAndReady()) {
-      try {
-        await directHumeEVI.endInterview();
-      } catch (e) {
-        console.error('Error ending interview:', e);
-      }
-    }
-
-    // Clear any timers
-    if (interviewTimerRef.current) {
-      clearInterval(interviewTimerRef.current);
-      interviewTimerRef.current = null;
-    }
-
-    // Clean up directHumeEVI completely when closing
-    directHumeEVI.cleanup();
-
-    // Reset all state
-    setStage('initial');
-    setIsRecording(false);
-    setTranscript([]);
-    setCurrentTime(0);
-    setIsContextOpen(false);
-    setError(null);
-    setSessionId(null);
-    setAiIsSpeaking(false);
-    setIsConnecting(false);
-    setRecruiterContext({
-      recruiterName: "",
-      recruiterTitle: "",
-      company: "",
-      position: "",
-      jobDescription: ""
-    });
-    setInterviewSummary(null);
-    setCompletedSessionId(null);
-    setFullTranscriptFromDB(null);
-    setIsListening(false);
-
-    // Reset message handlers flag
-    messageHandlersSetup.current = false;
-
-    onClose();
-  };
-
-  const toggleRecording = async () => {
-    if (!directHumeEVI.isConnectedAndReady()) return;
-    
-    try {
-      if (isRecording) {
-        directHumeEVI.stopRecording();
-        setIsRecording(false);
-      } else {
-        await directHumeEVI.startRecording();
-        setIsRecording(true);
-      }
-    } catch (error) {
-      console.error('❌ Error toggling recording:', error);
-      setError('Failed to toggle recording');
-    }
-  };
-
-  const updateRecruiterContext = (field: keyof typeof recruiterContext, value: string) => {
-    setRecruiterContext(prev => ({ ...prev, [field]: value }));
-  };
-
-  const renderInitialStage = () => (
-    <div className="space-y-6">
-      <div className="text-center space-y-6">
-        {/* Profile Avatar */}
-        <div className="flex justify-center">
-          <Avatar className="w-20 h-20 border-4 border-primary/20">
-            <AvatarImage src="" alt={candidateName} />
-            <AvatarFallback className="text-2xl font-semibold bg-gradient-primary text-white">
-              {getInitials(candidateName)}
-            </AvatarFallback>
-          </Avatar>
-        </div>
-        
-        <div>
-          <h3 className="text-2xl font-bold mb-2">Talk to {candidateName}'s Digital Twin</h3>
-          <p className="text-lg text-muted-foreground">{candidateData.jobTitle || 'Professional'} • {candidateData.location || 'Remote'}</p>
-          <p className="text-sm text-muted-foreground mt-2">AI-powered professional avatar</p>
-        </div>
-      </div>
-
-      <Card className="p-6 bg-gradient-to-br from-primary/5 to-blue-500/5 border-primary/20">
-        <div className="space-y-4">
-          <div className="flex items-center gap-2 justify-center">
-            <Volume2 className="w-5 h-5 text-primary" />
-            <h4 className="font-semibold text-primary">Digital Twin Technology</h4>
-          </div>
-          <ul className="text-sm text-muted-foreground space-y-2">
-            <li className="flex items-center gap-2">
-              <div className="w-2 h-2 bg-primary rounded-full"></div>
-              <span>Speaks as {candidateName.split(' ')[0]} with their actual experience</span>
-            </li>
-            <li className="flex items-center gap-2">
-              <div className="w-2 h-2 bg-primary rounded-full"></div>
-              <span>Answers based on real resume and interview data</span>
-            </li>
-            <li className="flex items-center gap-2">
-              <div className="w-2 h-2 bg-primary rounded-full"></div>
-              <span>Natural conversation with no time limits</span>
-            </li>
-            <li className="flex items-center gap-2">
-              <div className="w-2 h-2 bg-primary rounded-full"></div>
-              <span>Perfect for initial screening and assessment</span>
-            </li>
-          </ul>
-        </div>
-      </Card>
-
-      {/* Recruiter Context Form */}
-      <Collapsible open={isContextOpen} onOpenChange={setIsContextOpen}>
-        <CollapsibleTrigger asChild>
-          <Button 
-            variant="outline" 
-            className="w-full justify-between"
-          >
-            <span>Interview Context (Optional)</span>
-            <ChevronDown className={`w-4 h-4 transition-transform ${isContextOpen ? 'rotate-180' : ''}`} />
-          </Button>
-        </CollapsibleTrigger>
-        <CollapsibleContent className="mt-4">
-          <Card className="p-4 space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="recruiterName" className="flex items-center gap-2">
-                  <User className="w-4 h-4" />
-                  Recruiter Name
-                </Label>
-                <Input
-                  id="recruiterName"
-                  value={recruiterContext.recruiterName}
-                  onChange={(e) => updateRecruiterContext('recruiterName', e.target.value)}
-                  placeholder="Enter your name"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="recruiterTitle" className="flex items-center gap-2">
-                  <Briefcase className="w-4 h-4" />
-                  Your Title
-                </Label>
-                <Input
-                  id="recruiterTitle"
-                  value={recruiterContext.recruiterTitle}
-                  onChange={(e) => updateRecruiterContext('recruiterTitle', e.target.value)}
-                  placeholder="e.g., Senior Recruiter"
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="company" className="flex items-center gap-2">
-                  <Building className="w-4 h-4" />
-                  Company
-                </Label>
-                <Input
-                  id="company"
-                  value={recruiterContext.company}
-                  onChange={(e) => updateRecruiterContext('company', e.target.value)}
-                  placeholder="Company name"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="position" className="flex items-center gap-2">
-                  <Target className="w-4 h-4" />
-                  Position Looking For
-                </Label>
-                <Input
-                  id="position"
-                  value={recruiterContext.position}
-                  onChange={(e) => updateRecruiterContext('position', e.target.value)}
-                  placeholder="e.g., Senior Frontend Developer"
-                />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="jobDescription">Job Description</Label>
-              <Textarea
-                id="jobDescription"
-                value={recruiterContext.jobDescription}
-                onChange={(e) => updateRecruiterContext('jobDescription', e.target.value)}
-                placeholder="Provide a brief description of the role, requirements, and what you're looking for in a candidate..."
-                rows={3}
-              />
-            </div>
-          </Card>
-        </CollapsibleContent>
-      </Collapsible>
-
-      <div className="flex gap-3">
-        <Button variant="outline" onClick={handleClose} className="flex-1">
-          Cancel
-        </Button>
-        <Button 
-          onClick={handleStartInterview} 
-          className="flex-1 bg-gradient-to-r from-cyan-500 to-blue-500 hover:opacity-90"
-          disabled={isConnecting}
-        >
-          {isConnecting ? (
-            <>
-              <div className="w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              Connecting...
-            </>
-          ) : (
-            <>
-              <Mic className="w-4 h-4 mr-2" />
-              Start Voice Screening
-            </>
-          )}
-        </Button>
-      </div>
-    </div>
-  );
-
-  const renderRecordingStage = () => (
-    <div className="space-y-6">
-      <div className="text-center space-y-4">
-        {/* Voice Recording Indicator */}
-        <div className="relative inline-flex">
-          <div className={`w-24 h-24 rounded-full flex items-center justify-center transition-all duration-300 ${
-            isRecording && !aiIsSpeaking 
-              ? 'bg-gradient-to-br from-blue-500 to-blue-600 shadow-lg shadow-blue-500/30' 
-              : aiIsSpeaking
-              ? 'bg-gradient-to-br from-purple-500 to-purple-600 shadow-lg shadow-purple-500/30'
-              : 'bg-muted'
-          }`}>
-            {aiIsSpeaking ? (
-              <Volume2 className="w-10 h-10 text-white animate-pulse" />
-            ) : isRecording ? (
-              <Mic className="w-10 h-10 text-white" />
-            ) : (
-              <MicOff className="w-10 h-10 text-muted-foreground" />
-            )}
-          </div>
-          {(isRecording || aiIsSpeaking) && (
-            <span className="absolute flex h-full w-full">
-              <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                aiIsSpeaking ? 'bg-purple-400' : 'bg-blue-400'
-              }`}></span>
-            </span>
-          )}
-        </div>
-        
-        <div className="space-y-2">
-          <h3 className="text-xl font-semibold">
-            {aiIsSpeaking 
-              ? "AI is Speaking" 
-              : isListening 
-              ? "Listening..."
-              : "Connecting..."}
-          </h3>
-          <div className="flex items-center justify-center gap-4">
-            <div className="flex items-center gap-2">
-              <Clock className="w-4 h-4" />
-              <span className="text-lg font-mono">{formatTime(currentTime)}</span>
-            </div>
-            <Badge variant="outline" className="text-xs">
-              No Time Limit
-            </Badge>
-          </div>
-        </div>
-      </div>
-
-      {error && (
-        <Card className="p-4 bg-red-50 border-red-200">
-          <div className="flex items-center gap-2 text-red-600">
-            <AlertCircle className="w-4 h-4" />
-            <p className="text-sm">{error}</p>
-          </div>
-        </Card>
-      )}
-
-      <Card className="p-4 bg-muted/30">
-        <h4 className="font-medium mb-3 flex items-center gap-2">
-          <FileText className="w-4 h-4" />
-          Live Conversation
-        </h4>
-        <div ref={transcriptContainerRef} className="space-y-4 max-h-64 overflow-y-auto">
-          {transcript.map((message, index) => (
-            <div key={index} className={`flex gap-3 ${
-              message.type === 'assistant_message' ? 'justify-start' : 'justify-end'
-            }`}>
-              <div className={`max-w-[80%] p-3 rounded-lg ${
-                message.type === 'assistant_message' 
-                  ? 'bg-primary/10 border border-primary/20' 
-                  : 'bg-blue-500 text-white'
-              }`}>
-                <div className="text-xs font-medium mb-1 opacity-80">
-                  {message.type === 'assistant_message' ? candidateName : 'Recruiter'}
-                </div>
-                <div className="text-sm">
-                  {message.content}
-                </div>
-              </div>
-            </div>
-          ))}
-          {aiIsSpeaking && (
-            <div className="flex justify-start">
-              <div className="bg-primary/5 border border-primary/20 p-3 rounded-lg">
-                <div className="flex items-center gap-2 text-primary">
-                  <Volume2 className="w-4 h-4 animate-pulse" />
-                  <span className="text-sm">{candidateName} is speaking...</span>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      </Card>
-
-      {/* Single Complete Interview Button */}
-      <div className="flex justify-center">
-        <Button 
-          onClick={handleCompleteInterview}
-          size="lg"
-          className="bg-gradient-to-r from-primary to-blue-600 hover:opacity-90"
-          disabled={transcript.length === 0 || !directHumeEVI.isConnectedAndReady()}
-        >
-          Complete Interview
-        </Button>
-      </div>
-    </div>
-  );
-
-  const renderProcessingStage = () => (
-    <div className="space-y-6">
-      <div className="text-center space-y-4">
-        <h3 className="text-xl font-semibold">Interview Completed!</h3>
-        <p className="text-muted-foreground">Processing conversation insights...</p>
-      </div>
-      
-      <Card className="p-6">
-        <div className="space-y-4">
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded-full bg-primary animate-pulse" />
-            <span className="text-sm">Extracting candidate summary...</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded-full bg-primary animate-pulse" />
-            <span className="text-sm">Analyzing key strengths...</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded-full bg-primary animate-pulse" />
-            <span className="text-sm">Evaluating culture fit...</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded-full bg-primary animate-pulse" />
-            <span className="text-sm">Generating recruiter insights...</span>
-          </div>
-        </div>
-      </Card>
-    </div>
-  );
-
-  const renderBriefStage = () => {
-    // Ensure we have a properly structured insights object with all required fields
-    const defaultInsights = {
-      keyInsights: [
-        "Strong technical background in modern web technologies",
-        "Clear communication and ability to explain complex concepts", 
-        "Team-oriented professional with leadership experience",
-        "Demonstrated expertise in React and TypeScript",
-        "Values quality, innovation, and continuous learning"
-      ],
-      recruiterRecommendation: "Strong candidate worth pursuing for technical roles. Consider scheduling a follow-up technical interview.",
-      overallMatch: recruiterContext.position ? "high" : "medium"
-    };
-    
-    // Use actual interview insights if available, otherwise use defaults
-    const insights = interviewSummary && Object.keys(interviewSummary).length > 0 ? {
-      keyInsights: Array.isArray(interviewSummary.keyInsights) && interviewSummary.keyInsights.length > 0 
-        ? interviewSummary.keyInsights 
-        : defaultInsights.keyInsights,
-      recruiterRecommendation: interviewSummary.recruiterRecommendation || defaultInsights.recruiterRecommendation,
-      overallMatch: interviewSummary.overallMatch || defaultInsights.overallMatch
-    } : defaultInsights;
-
-    return (
-      <div className="space-y-6">
-        <div className="text-center space-y-4">
-          <div className="w-20 h-20 bg-gradient-to-br from-green-400 to-emerald-600 rounded-full flex items-center justify-center mx-auto shadow-lg">
-            <Target className="w-10 h-10 text-white" />
-          </div>
-          <div>
-            <h3 className="text-xl font-semibold text-green-600">Screening Interview Completed!</h3>
-            <p className="text-muted-foreground">Here are the key insights from your conversation</p>
-          </div>
-        </div>
-
-        <div className="space-y-4">
-          {/* Key Insights */}
-          <Card className="p-4 border-primary/20">
-            <div className="flex items-center gap-2 mb-3">
-              <TrendingUp className="w-4 h-4 text-primary" />
-              <h4 className="font-medium">Key Insights</h4>
-            </div>
-            <ul className="text-sm space-y-2">
-              {(insights.keyInsights || []).map((insight: string, index: number) => (
-                <li key={index} className="flex items-start gap-2">
-                  <span className="text-primary mt-1">•</span>
-                  <span>{insight}</span>
-                </li>
-              ))}
-            </ul>
-          </Card>
-
-          {/* Recruiter Recommendation */}
-          <Card className="p-4 border-purple-200 bg-purple-50/50">
-            <div className="flex items-center gap-2 mb-3">
-              <Briefcase className="w-4 h-4 text-purple-600" />
-              <h4 className="font-medium text-purple-800">Recruiter Recommendation</h4>
-            </div>
-            <p className="text-sm text-purple-700">
-              {insights.recruiterRecommendation}
-            </p>
-            <div className="mt-3">
-              <Badge className={`${
-                insights.overallMatch === 'high' 
-                  ? 'bg-green-100 text-green-800 border-green-300'
-                  : insights.overallMatch === 'medium'
-                  ? 'bg-yellow-100 text-yellow-800 border-yellow-300'
-                  : 'bg-gray-100 text-gray-800 border-gray-300'
-              }`}>
-                {insights.overallMatch === 'high' ? 'Strong Match' : 
-                 insights.overallMatch === 'medium' ? 'Good Match' : 'Potential Match'}
-              </Badge>
-            </div>
-          </Card>
-
-          {/* Interview Stats */}
-          <Card className="p-4">
-            <div className="flex items-center gap-2 mb-3">
-              <Clock className="w-4 h-4 text-primary" />
-              <h4 className="font-medium">Interview Statistics</h4>
-            </div>
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              <div className="text-center">
-                <p className="text-2xl font-bold text-primary">{formatTime(currentTime)}</p>
-                <p className="text-muted-foreground">Duration</p>
-              </div>
-              <div className="text-center">
-                <p className="text-2xl font-bold text-primary">{transcript.filter(m => m.type === 'user_message').length}</p>
-                <p className="text-muted-foreground">Questions Asked</p>
-              </div>
-            </div>
-          </Card>
-        </div>
-
-        <div className="flex gap-3">
-          <Button 
-            variant="outline" 
-            onClick={async () => {
-              setShowTranscriptDialog(true);
-              await fetchFullTranscript();
-            }}
-            className="flex-1"
-          >
-            <FileText className="w-4 h-4 mr-2" />
-            View Full Transcript
-          </Button>
-          <Button onClick={handleClose} className="flex-1 bg-gradient-primary">
-            Done
-          </Button>
-        </div>
-      </div>
-    );
-  };
+  const statusDisplay = getStatusDisplay();
 
   return (
     <>
-      <Dialog open={isOpen} onOpenChange={handleClose}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="sr-only">Voice Screening Interview</DialogTitle>
-          </DialogHeader>
-          {stage === 'initial' && renderInitialStage()}
-          {stage === 'recording' && renderRecordingStage()}
-          {stage === 'processing' && renderProcessingStage()}
-          {stage === 'brief' && renderBriefStage()}
-        </DialogContent>
+      <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <User className="h-5 w-5" />
+            Profile Interview - {candidateName || 'Candidate'}
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-6">
+          {/* Enhanced Profile Avatar Section */}
+          <div className="text-center space-y-6">
+            <div className="flex justify-center">
+              <Avatar className="w-20 h-20 border-4 border-primary/20">
+                <AvatarImage src="" alt={candidateName || 'Candidate'} />
+                <AvatarFallback className="text-2xl font-semibold bg-gradient-primary text-white">
+                  {getInitials(candidateName || 'Candidate')}
+                </AvatarFallback>
+              </Avatar>
+            </div>
+
+            <div>
+              <h3 className="text-2xl font-bold mb-2">Talk to {candidateName || 'Candidate'}'s Digital Twin</h3>
+              <p className="text-lg text-muted-foreground">{candidateData?.jobTitle || 'Professional'} • {candidateData?.location || 'Remote'}</p>
+            </div>
+          </div>
+
+
+          {/* Recruiter Context Form */}
+          <Collapsible open={isContextOpen} onOpenChange={setIsContextOpen}>
+            <CollapsibleTrigger asChild>
+              <Button
+                variant="outline"
+                className="w-full justify-between"
+              >
+                <span>Recruiter Information (Optional)</span>
+                <ChevronDown className={`w-4 h-4 transition-transform ${isContextOpen ? 'rotate-180' : ''}`} />
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="mt-4">
+              <Card className="p-4 space-y-4">
+                <p className="text-sm text-muted-foreground mb-4">
+                  Optional - helps us personalize the interview and save your information for future reference
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="recruiterName" className="flex items-center gap-2">
+                      <User className="w-4 h-4" />
+                      Your Name
+                    </Label>
+                    <Input
+                      id="recruiterName"
+                      value={recruiterContext.recruiterName}
+                      onChange={(e) => updateRecruiterContext('recruiterName', e.target.value)}
+                      placeholder="John Smith"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="recruiterEmail" className="flex items-center gap-2">
+                      <User className="w-4 h-4" />
+                      Email
+                    </Label>
+                    <Input
+                      id="recruiterEmail"
+                      type="email"
+                      value={recruiterContext.recruiterEmail}
+                      onChange={(e) => updateRecruiterContext('recruiterEmail', e.target.value)}
+                      placeholder="john@company.com"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="recruiterTitle" className="flex items-center gap-2">
+                      <Briefcase className="w-4 h-4" />
+                      Your Title
+                    </Label>
+                    <Input
+                      id="recruiterTitle"
+                      value={recruiterContext.recruiterTitle}
+                      onChange={(e) => updateRecruiterContext('recruiterTitle', e.target.value)}
+                      placeholder="Senior Recruiter"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="company" className="flex items-center gap-2">
+                      <Building className="w-4 h-4" />
+                      Company
+                    </Label>
+                    <Input
+                      id="company"
+                      value={recruiterContext.company}
+                      onChange={(e) => updateRecruiterContext('company', e.target.value)}
+                      placeholder="TechCorp Inc."
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="recruiterLinkedin" className="flex items-center gap-2">
+                      <User className="w-4 h-4" />
+                      LinkedIn (Optional)
+                    </Label>
+                    <Input
+                      id="recruiterLinkedin"
+                      value={recruiterContext.recruiterLinkedin}
+                      onChange={(e) => updateRecruiterContext('recruiterLinkedin', e.target.value)}
+                      placeholder="linkedin.com/in/username"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="recruiterPhone" className="flex items-center gap-2">
+                      <User className="w-4 h-4" />
+                      Phone (Optional)
+                    </Label>
+                    <Input
+                      id="recruiterPhone"
+                      value={recruiterContext.recruiterPhone}
+                      onChange={(e) => updateRecruiterContext('recruiterPhone', e.target.value)}
+                      placeholder="+1-555-0123"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="position" className="flex items-center gap-2">
+                    <Target className="w-4 h-4" />
+                    Position You're Hiring For
+                  </Label>
+                  <Input
+                    id="position"
+                    value={recruiterContext.position}
+                    onChange={(e) => updateRecruiterContext('position', e.target.value)}
+                    placeholder="e.g., Senior Frontend Developer"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="jobDescription">Job Description</Label>
+                  <Textarea
+                    id="jobDescription"
+                    value={recruiterContext.jobDescription}
+                    onChange={(e) => updateRecruiterContext('jobDescription', e.target.value)}
+                    placeholder="Provide a brief description of the role, requirements, and what you're looking for in a candidate..."
+                    rows={3}
+                  />
+                </div>
+              </Card>
+            </CollapsibleContent>
+          </Collapsible>
+
+          {/* Configuration Loading */}
+          {isLoadingConfig && (
+            <Card className="p-6">
+              <div className="text-center space-y-4">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+                <div>
+                  <p className="font-medium">Creating Zero-Hallucination Interview Config</p>
+                  <p className="text-sm text-gray-600">Setting up mandatory tool usage and anti-hallucination rules...</p>
+                </div>
+              </div>
+            </Card>
+          )}
+
+          {/* Configuration Error */}
+          {configError && (
+            <Card className="p-4 border-red-200 bg-red-50">
+              <div className="flex items-center gap-2 text-red-800">
+                <AlertCircle className="h-4 w-4" />
+                <span className="font-medium">Configuration Error</span>
+              </div>
+              <p className="text-sm text-red-700 mt-2">{configError}</p>
+            </Card>
+          )}
+
+          {/* Interview Controls */}
+          {stage === 'ready' && configId && (
+            <div className="flex gap-3">
+              <Button variant="outline" onClick={onClose} className="flex-1">
+                Cancel
+              </Button>
+              <Button
+                onClick={handleStartInterview}
+                className="flex-1 bg-gradient-to-r from-cyan-500 to-blue-500 hover:opacity-90"
+                disabled={!configId}
+              >
+                <Mic className="w-4 h-4 mr-2" />
+                Start Voice Interview
+              </Button>
+            </div>
+          )}
+
+          {/* Recording Interface */}
+          {stage === 'recording' && (
+            <Card className="p-6">
+              <div className="space-y-4">
+                {/* Status */}
+                <div className="text-center">
+                  <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto transition-colors mb-4 ${
+                    isAIPlaying ? 'bg-blue-100 animate-pulse' :
+                    isRecording ? 'bg-red-100 animate-pulse' : 'bg-muted'
+                  }`}>
+                    {isAIPlaying ? (
+                      <Volume2 className="w-8 h-8 text-blue-600" />
+                    ) : isRecording ? (
+                      <Mic className="w-8 h-8 text-red-600" />
+                    ) : (
+                      <MicOff className="w-8 h-8 text-muted-foreground" />
+                    )}
+                  </div>
+                  <div className="flex items-center justify-center gap-2 mb-2">
+                    <div className="animate-pulse bg-red-500 rounded-full h-3 w-3"></div>
+                    <span className="font-medium">Profile Interview in Progress</span>
+                  </div>
+                  <p className={`text-sm ${statusDisplay.color}`}>
+                    Status: {statusDisplay.text}
+                  </p>
+
+                  {/* Live status indicators */}
+                  <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground mt-2">
+                    {isAIPlaying && (
+                      <>
+                        <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                        <span>AI Speaking...</span>
+                      </>
+                    )}
+                    {isRecording && !isAIPlaying && (
+                      <>
+                        <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+                        <span>Listening for your response...</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Timer */}
+                <div className="text-center">
+                  <div className="text-2xl font-mono font-bold">
+                    {formatTime(currentTime)}
+                  </div>
+                </div>
+
+                {/* Controls */}
+                <div className="flex justify-center">
+                  <Button
+                    onClick={handleCompleteInterview}
+                    size="lg"
+                    className="bg-gradient-to-r from-primary to-blue-600 hover:opacity-90"
+                    disabled={transcript.length === 0}
+                  >
+                    Complete Interview
+                  </Button>
+                </div>
+
+                {/* Live Transcript */}
+                <Card className="p-4">
+                  <h4 className="font-medium mb-3 flex items-center gap-2">
+                    <FileText className="w-4 h-4" />
+                    Live Conversation
+                  </h4>
+                  <div ref={transcriptContainerRef} className="space-y-3 max-h-64 overflow-y-auto">
+                    {transcript.map((message, index) => (
+                      <div key={index} className={`text-sm ${
+                        message.type === 'assistant_message' ? 'text-primary' : 'text-foreground'
+                      }`}>
+                        <strong>{message.type === 'assistant_message' ? `${candidateName || 'Candidate'} speaking:` : 'You:'}</strong> {message.content}
+                      </div>
+                    ))}
+                    {transcript.length === 0 && (
+                      <div className="text-center text-muted-foreground text-sm py-8">
+                        <div className="animate-pulse">Waiting for conversation to begin...</div>
+                      </div>
+                    )}
+                  </div>
+                </Card>
+
+                {/* Guidelines */}
+                <div className="text-xs text-gray-600 space-y-1">
+                  <p>• Ask questions about the candidate's background and experience</p>
+                  <p>• The AI will only respond with verified profile information</p>
+                  <p>• All responses are fact-checked against the database</p>
+                </div>
+              </div>
+            </Card>
+          )}
+
+          {/* Saving Stage */}
+          {stage === 'saving' && (
+            <div className="space-y-6">
+              <div className="text-center space-y-4">
+                <div className="relative inline-flex">
+                  <div className="w-24 h-24 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center">
+                    <div className="w-8 h-8 border-4 border-white border-t-transparent rounded-full animate-spin" />
+                  </div>
+                </div>
+                <h3 className="text-xl font-semibold">Saving Interview</h3>
+                <p className="text-muted-foreground">Collecting final transcripts...</p>
+              </div>
+
+              <Card className="p-6 border-blue-200 bg-blue-50/20">
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 text-blue-600">
+                    <Clock className="w-4 h-4 animate-pulse" />
+                    <span className="text-sm">Please wait while we save your conversation</span>
+                  </div>
+                  <div className="text-xs text-muted-foreground text-center">
+                    This ensures all responses are properly captured
+                  </div>
+                </div>
+              </Card>
+            </div>
+          )}
+
+          {/* Processing Stage */}
+          {stage === 'processing' && (
+            <div className="space-y-6">
+              <div className="text-center space-y-4">
+                <div className="relative inline-flex">
+                  <div className="w-24 h-24 rounded-full bg-gradient-to-br from-purple-500 to-purple-600 flex items-center justify-center">
+                    <TrendingUp className="w-10 h-10 text-white animate-pulse" />
+                  </div>
+                </div>
+                <h3 className="text-xl font-semibold">Processing Interview</h3>
+                <p className="text-muted-foreground">Generating insights from your conversation...</p>
+              </div>
+
+              <Card className="p-6">
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 rounded-full bg-primary animate-pulse" />
+                    <span className="text-sm">Analyzing conversation transcript...</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 rounded-full bg-primary animate-pulse" />
+                    <span className="text-sm">Extracting key discussion points...</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 rounded-full bg-primary animate-pulse" />
+                    <span className="text-sm">Identifying candidate strengths...</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 rounded-full bg-primary animate-pulse" />
+                    <span className="text-sm">Generating interview summary...</span>
+                  </div>
+                </div>
+              </Card>
+            </div>
+          )}
+
+          {/* Brief Stage */}
+          {stage === 'brief' && (
+            <div className="space-y-6">
+              <div className="text-center space-y-4">
+                <div className="w-20 h-20 bg-gradient-to-br from-green-400 to-emerald-600 rounded-full flex items-center justify-center mx-auto shadow-lg">
+                  <Target className="w-10 h-10 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-semibold text-green-600">Profile Interview Completed!</h3>
+                  <p className="text-muted-foreground">Here are the key insights from your conversation</p>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                {/* Key Insights */}
+                {interviewSummary?.keyInsights && interviewSummary.keyInsights.length > 0 && (
+                  <Card className="p-5 border-primary/20 bg-gradient-to-br from-primary/5 to-blue-500/5">
+                    <div className="flex items-center gap-2 mb-4">
+                      <div className="p-1.5 bg-primary/10 rounded-lg">
+                        <TrendingUp className="w-4 h-4 text-primary" />
+                      </div>
+                      <h4 className="font-semibold text-lg">📊 Key Insights</h4>
+                    </div>
+                    <ul className="text-sm space-y-3">
+                      {interviewSummary.keyInsights.map((insight: string, index: number) => (
+                        <li key={index} className="flex items-start gap-3">
+                          <span className="text-primary font-bold mt-0.5">•</span>
+                          <span className="leading-relaxed">{insight}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </Card>
+                )}
+
+                {/* Recruiter Recommendation */}
+                <Card className="p-5 border-blue-200 bg-gradient-to-br from-blue-50/50 to-indigo-50/50">
+                  <div className="flex items-center gap-2 mb-4">
+                    <div className="p-1.5 bg-blue-100 rounded-lg">
+                      <Briefcase className="w-4 h-4 text-blue-600" />
+                    </div>
+                    <h4 className="font-semibold text-lg text-blue-900">💼 Interview Summary</h4>
+                  </div>
+                  <p className="text-sm text-gray-700 leading-relaxed mb-4">
+                    {interviewSummary?.recruiterRecommendation || 'Interview analysis complete. Please review the conversation highlights for key insights.'}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <Badge className="px-3 py-1 font-semibold bg-green-100 text-green-800 border-green-300">
+                      ⭐ Profile Interview Complete
+                    </Badge>
+                  </div>
+                </Card>
+
+                {/* Interview Stats */}
+                <Card className="p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Clock className="w-4 h-4 text-primary" />
+                    <h4 className="font-medium">Interview Statistics</h4>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div className="text-center">
+                      <p className="text-2xl font-bold text-primary">{formatTime(currentTime)}</p>
+                      <p className="text-muted-foreground">Duration</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-2xl font-bold text-primary">{transcript.filter(m => m.type === 'user_message').length}</p>
+                      <p className="text-muted-foreground">Questions Asked</p>
+                    </div>
+                  </div>
+                </Card>
+              </div>
+
+              <div className="flex gap-3">
+                <Button
+                  variant="outline"
+                  onClick={async () => {
+                    setShowTranscriptDialog(true);
+                    await fetchFullTranscript();
+                  }}
+                  className="flex-1"
+                >
+                  <FileText className="w-4 h-4 mr-2" />
+                  View Transcript
+                </Button>
+                <Button onClick={onClose} className="flex-1 bg-gradient-primary">
+                  Close
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Error Display */}
+          {error && (
+            <Card className="p-4 border-red-200 bg-red-50">
+              <div className="flex items-center gap-2 text-red-800">
+                <AlertCircle className="h-4 w-4" />
+                <span className="font-medium">Error</span>
+              </div>
+              <p className="text-sm text-red-700 mt-2">{error}</p>
+            </Card>
+          )}
+        </div>
+      </DialogContent>
       </Dialog>
 
       {/* Transcript Dialog */}
@@ -857,7 +935,7 @@ export default function ProfileVoiceInterviewDialog({
                 <span>Duration: {formatTime(currentTime)}</span>
               </div>
               <Separator orientation="vertical" className="h-4" />
-              <span>{candidateName} • Screening Interview</span>
+              <span>{candidateName || 'Candidate'} • Profile Interview</span>
               {recruiterContext.recruiterName && (
                 <>
                   <Separator orientation="vertical" className="h-4" />
@@ -867,29 +945,47 @@ export default function ProfileVoiceInterviewDialog({
             </div>
             <Separator />
             <div className="space-y-4">
-              {(fullTranscriptFromDB || transcript).length === 0 ? (
-                <p className="text-center text-muted-foreground py-8">No transcript available</p>
-              ) : (
-                (fullTranscriptFromDB || transcript).map((message, index) => (
-                  <div key={index} className={`p-3 rounded-lg ${
-                    message.type === 'assistant_message' 
-                      ? 'bg-primary/5 border-l-4 border-primary' 
-                      : 'bg-muted/50 border-l-4 border-muted-foreground'
-                  }`}>
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-sm font-medium">
-                        {message.type === 'assistant_message' ? candidateName : (recruiterContext.recruiterName || 'Recruiter')}
-                      </span>
-                      <span className="text-xs text-muted-foreground">
-                        {message.timestamp ? new Date(message.timestamp).toLocaleTimeString() : ''}
-                      </span>
+              {(() => {
+                const transcriptData = fullTranscriptFromDB || transcript;
+
+                // Safety check - ensure transcriptData is an array
+                if (!Array.isArray(transcriptData)) {
+                  console.error('Transcript is not an array:', transcriptData);
+                  return <p className="text-center text-muted-foreground py-8">Error loading transcript</p>;
+                }
+
+                if (transcriptData.length === 0) {
+                  return <p className="text-center text-muted-foreground py-8">No transcript available</p>;
+                }
+
+                return transcriptData.map((message, index) => {
+                  // Safety check for message structure
+                  if (!message || typeof message !== 'object') {
+                    console.error('Invalid message format:', message);
+                    return null;
+                  }
+
+                  return (
+                    <div key={index} className={`p-3 rounded-lg ${
+                      message.type === 'assistant_message'
+                        ? 'bg-primary/5 border-l-4 border-primary'
+                        : 'bg-muted/50 border-l-4 border-muted-foreground'
+                    }`}>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-sm font-medium">
+                          {message.type === 'assistant_message' ? (candidateName || 'Candidate') : (recruiterContext.recruiterName || 'Interviewer')}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          {message.timestamp ? new Date(message.timestamp).toLocaleTimeString() : ''}
+                        </span>
+                      </div>
+                      <div className="text-sm">
+                        {message.content || message.text || ''}
+                      </div>
                     </div>
-                    <div className="text-sm">
-                      {message.content}
-                    </div>
-                  </div>
-                ))
-              )}
+                  );
+                });
+              })()}
             </div>
           </div>
           <div className="flex justify-end pt-4">
@@ -897,7 +993,7 @@ export default function ProfileVoiceInterviewDialog({
               Close
             </Button>
           </div>
-        </DialogContent>
+      </DialogContent>
       </Dialog>
     </>
   );

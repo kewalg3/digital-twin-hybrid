@@ -117,7 +117,8 @@ class ResumeController {
           totalExperience: parsedData.totalExperience,
           industryType: parsedData.industryType,
           professionalSummary: parsedData.professionalSummary || null,
-          parsingStatus: 'completed'
+          parsingStatus: 'completed',
+          parsing_complete: false
         },
         select: {
           id: true,
@@ -315,6 +316,13 @@ class ResumeController {
         }
       });
 
+      // IMPORTANT: Only set parsing_complete to true AFTER all processing is done
+      // This ensures the frontend button only activates when everything is truly complete
+      await prisma.resume.update({
+        where: { id: resume.id },
+        data: { parsing_complete: true }
+      });
+
       res.status(201).json({
         success: true,
         message: 'Resume uploaded and parsed successfully',
@@ -392,6 +400,7 @@ class ResumeController {
           skillsExtracted: true,
           totalExperience: true,
           parsedContent: true,
+          parsing_complete: true,
           createdAt: true
         },
         orderBy: { createdAt: 'desc' }

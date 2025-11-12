@@ -261,17 +261,17 @@ export default function Profile() {
               </div>
 
               <div className="flex justify-center gap-4">
-                {/* Hume EVI Button - Hidden but kept for future use */}
+                {/* Hume EVI Button - Hidden
                 <Button
                   size="lg"
                   onClick={() => setIsInterviewDialogOpen(true)}
                   className="bg-gradient-to-r from-primary to-cyan-500 hover:opacity-90 text-white px-8 py-3 text-lg font-semibold shadow-lg"
-                  style={{ display: 'none' }}
                 >
                   <Mic className="w-5 h-5 mr-3" />
                   Start Voice Screening (Hume)
                   <Sparkles className="w-4 h-4 ml-2" />
                 </Button>
+                */}
 
                 {/* LiveKit Interview Button - Visible */}
                 <Button
@@ -280,7 +280,7 @@ export default function Profile() {
                   className="bg-gradient-to-r from-purple-500 to-pink-500 hover:opacity-90 text-white px-8 py-3 text-lg font-semibold shadow-lg"
                 >
                   <Video className="w-5 h-5 mr-3" />
-                  Start LiveKit Interview
+                  Start Interview
                   <Sparkles className="w-4 h-4 ml-2" />
                 </Button>
               </div>

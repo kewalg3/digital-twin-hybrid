@@ -524,7 +524,7 @@ export default function WorkStyleInterviewDialog({ isOpen, onClose, onInterviewC
         </div>
         <h3 className="text-lg font-semibold">Work Style Interview</h3>
         <p className="text-sm text-muted-foreground max-w-md mx-auto">
-          Let's have a conversation about your work preferences and collaboration style. This helps us understand what environment you thrive in.
+          Let's have a conversation about your work style and career goals.
         </p>
       </div>
 
@@ -537,25 +537,18 @@ export default function WorkStyleInterviewDialog({ isOpen, onClose, onInterviewC
           </li>
           <li className="flex items-start gap-2">
             <span className="text-primary">•</span>
-            <span>How you collaborate with teams and handle leadership</span>
+            <span>How you collaborate and communicate</span>
           </li>
           <li className="flex items-start gap-2">
             <span className="text-primary">•</span>
             <span>Your approach to challenges and pressure</span>
           </li>
+          <li className="flex items-start gap-2">
+            <span className="text-primary">•</span>
+            <span>What are your career goals</span>
+          </li>
         </ul>
       </Card>
-
-      <div className="flex items-center justify-between text-sm text-muted-foreground">
-        <div className="flex items-center gap-2">
-          <Clock className="h-4 w-4" />
-          <span>Duration: ~5 minutes</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <Mic className="h-4 w-4" />
-          <span>Voice interview</span>
-        </div>
-      </div>
 
 
       {microphoneStatus === 'testing' && (
@@ -634,7 +627,7 @@ export default function WorkStyleInterviewDialog({ isOpen, onClose, onInterviewC
           )}
         </div>
         <div>
-          <h3 className="text-xl font-semibold">Work Style Interview in Progress</h3>
+          <h3 className="text-xl font-semibold">Interview in Progress</h3>
           <p className={`text-lg font-mono ${getTimeColor(currentTime)}`}>
             {currentTime >= MAX_INTERVIEW_DURATION ? (
               'TIME EXCEEDED'
@@ -646,7 +639,7 @@ export default function WorkStyleInterviewDialog({ isOpen, onClose, onInterviewC
             {isAIPlaying && (
               <>
                 <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-                <span>AI Speaking...</span>
+                <span>Interviewer Speaking...</span>
               </>
             )}
             {isListening && !isAIPlaying && (
@@ -669,7 +662,7 @@ export default function WorkStyleInterviewDialog({ isOpen, onClose, onInterviewC
             <div key={index} className={`text-sm ${
               message.type === 'assistant_message' ? 'text-primary' : 'text-foreground'
             }`}>
-              <strong>{message.type === 'assistant_message' ? 'AI:' : 'You:'}</strong> {message.content}
+              <strong>{message.type === 'assistant_message' ? 'Interviewer:' : 'You:'}</strong> {message.content}
             </div>
           ))}
           {transcript.length === 0 && (
@@ -869,10 +862,7 @@ export default function WorkStyleInterviewDialog({ isOpen, onClose, onInterviewC
       <Dialog open={isOpen} onOpenChange={handleClose}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Work Style</DialogTitle>
-            <DialogDescription>
-              Let's understand your work preferences and collaboration style
-            </DialogDescription>
+            {/* Title and description removed as requested */}
           </DialogHeader>
           
           {renderStage()}

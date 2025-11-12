@@ -150,6 +150,41 @@ async def getCandidateFacts(
         else:
             result = {"found": False, "facts": ["Location information not available"]}
 
+    # Job preferences and career search status
+    elif any(term in query_lower for term in ["preference", "seeking", "employment", "work location", "relocate", "contract", "job search", "opportunity", "remote", "hybrid", "onsite", "full time", "part time"]):
+        prefs = {
+            "seeking_status": CANDIDATE_DATA.get('seekingOpportunities', ''),
+            "employment_type": CANDIDATE_DATA.get('employmentType', ''),
+            "work_locations": CANDIDATE_DATA.get('workLocations', []),
+            "willing_to_relocate": CANDIDATE_DATA.get('willingToRelocate', None),
+            "open_to_contract": CANDIDATE_DATA.get('openToContract', None)
+        }
+
+        # Format for natural conversation
+        pref_facts = []
+        if prefs["seeking_status"]:
+            status = "actively" if prefs["seeking_status"] == "active" else "passively"
+            pref_facts.append(f"Currently {status} seeking opportunities")
+        if prefs["employment_type"]:
+            emp_type = prefs["employment_type"].replace('_', '-')
+            pref_facts.append(f"Prefers {emp_type} employment")
+        if prefs["work_locations"]:
+            locations = ', '.join(prefs["work_locations"])
+            pref_facts.append(f"Open to {locations} work")
+        if prefs["willing_to_relocate"] is not None:
+            relocation = "Willing" if prefs["willing_to_relocate"] else "Not willing"
+            pref_facts.append(f"{relocation} to relocate")
+        if prefs["open_to_contract"] is not None:
+            contract = "Open" if prefs["open_to_contract"] else "Not open"
+            pref_facts.append(f"{contract} to contract work")
+
+        if pref_facts:
+            logger.info(f"[TOOL] Result: Found {len(pref_facts)} job preferences")
+            result = {"found": True, "facts": pref_facts}
+        else:
+            logger.info(f"[TOOL] Result: No job preferences available")
+            result = {"found": False, "facts": ["Job preferences not available"]}
+
     # Name
     elif "name" in query_lower or "who" in query_lower:
         result = {"found": True, "facts": [f"The candidate is {CANDIDATE_DATA.get('fullName', 'Unknown')}"]}
