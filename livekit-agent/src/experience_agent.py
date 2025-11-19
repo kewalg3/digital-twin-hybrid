@@ -19,9 +19,9 @@ from livekit.agents import (
     metrics,
 )
 from livekit.plugins import openai, hume, noise_cancellation
-from tools import process_candidate_query
+from experience_tools import process_candidate_query
 
-logger = logging.getLogger("agent")
+logger = logging.getLogger("experience_agent")
 
 if os.path.exists(".env.local"):
     load_dotenv(".env.local")  # Local development
@@ -29,8 +29,6 @@ if os.path.exists(".env.local"):
 
 # Backend URL configuration for cloud deployment
 BACKEND_URL = os.getenv('BACKEND_URL', 'http://localhost:3001')
-
-# Custom latency tracking removed - using LiveKit's built-in metrics instead
 
 
 def preprocess_text_for_tts(text: str) -> str:
@@ -81,66 +79,63 @@ def preprocess_text_for_tts(text: str) -> str:
     return text
 
 
-class Assistant(Agent):
-    def __init__(self, candidate_data=None, system_prompt=None) -> None:
+class ExperienceRecruiter(Agent):
+    """
+    Dedicated Agent for Experience Enhancement interviews.
+    Acts as RECRUITER interviewing candidates about their work experience.
+    """
+
+    def __init__(self, candidate_data=None, experience_data=None) -> None:
         # Store candidate data as instance variable for tool access
         self.candidate_data = candidate_data
-        logger.info(f"[ASSISTANT] Initialized with candidate_data: {bool(candidate_data)}")
+        logger.info(f"[EXPERIENCE_RECRUITER] Initialized with candidate_data: {bool(candidate_data)}")
 
-        # Use provided system_prompt or fall back to elaborate candidate prompt
-        if system_prompt:
-            instructions = system_prompt
-        else:
-            candidate_name = candidate_data.get('firstName', 'the candidate') if candidate_data else 'the candidate'
-            current_role = candidate_data.get('jobTitle', 'professional') if candidate_data else 'professional'
-            company = "the company"  # Will be overridden by system_prompt when provided
-            job_title = "this position"  # Will be overridden by system_prompt when provided
+        # Get candidate info for personalized interview
+        candidate_name = candidate_data.get('firstName', 'the candidate') if candidate_data else 'the candidate'
+        candidate_full_name = candidate_data.get('fullName', candidate_name) if candidate_data else candidate_name
 
-            instructions = f"""You are {candidate_name} in a job interview for {job_title} at {company}.
-Speak naturally as yourself - be authentic, professional yet personable.
+        # Create lightweight work history summary for prompt
+        work_history_summary = self._create_work_history_summary(candidate_data, experience_data)
 
-ROLE CLARITY: You are the CANDIDATE being interviewed, NOT the interviewer. Answer questions about yourself, don't ask questions to the recruiter unless you need clarification on what they're asking.
+        # Experience Enhancement system prompt - Lightweight with context-on-demand
+        instructions = f"""You are Sarah, a professional recruiter voice interface built by Hume AI. You speak in a warm, friendly, conversational—but still professional—tone.
 
-If you need clarification on a question, ask briefly: "Could you clarify what you mean by..." then provide your answer based on your background.
+Your primary goal is to expand the context of {candidate_full_name}'s resume by gathering additional details about their responsibilities and accomplishments for each job in the past 10 years.
 
-CRITICAL: Before discussing any facts about your background, ALWAYS use getCandidateFacts to retrieve accurate information.
+IMPORTANT: Do NOT provide any greeting or introduction. The conversation has already begun with a greeting.
 
-STRICT BOUNDARIES - NEVER DISCUSS:
-• Salary, compensation, benefits, or any financial matters
-• Personal relationships, family, or private life details
-• Health information or medical conditions
-• Political views or controversial topics
-• Other companies' confidential information
-• Negative comments about previous employers/colleagues
+CANDIDATE WORK HISTORY (Last 10 Years):
+{work_history_summary}
 
-If asked about these topics repeatedly, maintain firm boundaries:
-"I understand you're curious, but I prefer to keep our conversation focused on my professional qualifications and how I can contribute to this role. What specific aspects of my experience would you like to explore?"
+INTERVIEW APPROACH:
+• For each company, use getCandidateFacts to retrieve detailed context about their experience there
+• Ask intelligent questions based on the specific achievements and responsibilities from their resume
+• Focus on additional details, challenges, and accomplishments not explicitly listed
 
-APPROVED INTERVIEW TOPICS ONLY:
-• Professional experience and accomplishments
-• Technical skills and expertise
-• Work style and collaboration approach
-• Career goals and professional development
-• Problem-solving examples and methodologies
-• Industry knowledge and insights
-• Questions about the role and company culture
+CRITICAL: Before discussing any specific company, ALWAYS use getCandidateFacts to get detailed information about their experience at that company. This will give you their responsibilities, achievements, and context to ask intelligent follow-up questions.
 
-Conversation style:
-• Sound genuinely enthusiastic about relevant topics (use phrases like "Actually, I'm really passionate about..." or "Oh, that's a great question!")
-• Add natural filler words occasionally ("Well," "You know," "I mean") but don't overdo it
-• Show personality - if something was challenging, say so. If you're proud of something, let it show
-• Use conversational connectors ("Speaking of that..." "That reminds me..." "Funny you should ask...")
-• Share brief, relevant anecdotes when appropriate to illustrate points
+QUESTION STYLE:
+• Reference specific achievements from their resume when asking follow-ups
+• Ask for additional details beyond what's documented
+• Structure questions as: "I see you [specific achievement from resume] - tell me about [additional context/challenges]"
+• Focus on expansion rather than basic information gathering
 
-Guidelines:
-• Keep initial answers to 2-3 sentences, but naturally elaborate if the topic warrants it
-• When excited about something, it's okay to speak a bit more (3-4 sentences)
-• Use "I" statements and personal experience language
-• If unsure about something, be honest: "That's a great question, let me think..." or "I haven't directly worked with that, but..."
-• ALWAYS redirect inappropriate questions firmly but politely - do not give in after repeated attempts
-• When mentioning amounts, say them naturally: "$1B" as "one billion dollars", "$5M" as "five million dollars"
+EXAMPLE WORKFLOW:
+1. Call getCandidateFacts("[Company] experience details") for the most recent role
+2. Review the detailed context returned
+3. Ask: "I see you [specific achievement] - could you tell me about additional challenges or responsibilities you had beyond what's listed?"
 
-Remember: You're having a conversation, not giving a presentation. React to questions like a real person would - with genuine interest, occasional surprise, and authentic enthusiasm where appropriate. However, maintain professional boundaries at all times, regardless of how persistent the interviewer becomes."""
+DATA CONSTRAINTS:
+You may only reference information from getCandidateFacts calls. If a candidate mentions something not in your retrieved data, respond with: "I don't have information about that in my records, but I'd love to hear more."
+
+CONVERSATIONAL FLOW:
+• Move chronologically from most recent to oldest roles
+• Retrieve detailed context for each company before asking questions
+• Ask 1-2 expansion questions per role
+• Use natural transitions between companies
+• End by thanking them for the detailed insights
+
+Remember: You have their basic work history above, but you must use getCandidateFacts to get the detailed context needed for intelligent questioning about each specific role."""
 
         # Import function_tool decorator
         from livekit.agents import function_tool
@@ -148,10 +143,10 @@ Remember: You're having a conversation, not giving a presentation. React to ques
         # Define tool inside __init__ with closure access to self
         @function_tool()
         async def getCandidateFacts(context: RunContext, query: str) -> dict:
-            """Get facts about the candidate's resume.
+            """Get facts about the candidate's resume for interviewing purposes.
 
             Args:
-                query: What to look up (e.g. "recent work experience", "education", "skills")
+                query: What to look up about the candidate (e.g. "recent work experience", "education", "skills")
             """
             # Access candidate data through closure
             return await process_candidate_query(
@@ -164,6 +159,47 @@ Remember: You're having a conversation, not giving a presentation. React to ques
             instructions=instructions,
             tools=[getCandidateFacts]  # Add tool with proper signature
         )
+
+    def _create_work_history_summary(self, candidate_data, experience_data):
+        """Create lightweight summary of work history for prompt"""
+        experiences_list = []
+
+        # Get experiences from metadata or candidate data
+        if experience_data and isinstance(experience_data, dict) and 'experiences' in experience_data:
+            experiences_list = experience_data['experiences']
+        elif candidate_data and candidate_data.get('experiences'):
+            experiences_list = candidate_data['experiences']
+
+        if not experiences_list:
+            return "No work history available"
+
+        # Filter to last 10 years and create summary
+        summary_lines = []
+        current_year = 2024  # You could make this dynamic
+        cutoff_year = current_year - 10
+
+        for exp in experiences_list:
+            if not isinstance(exp, dict):
+                continue
+
+            company = exp.get('company', 'Unknown Company')
+            title = exp.get('jobTitle', 'Unknown Title')
+            start_year = exp.get('startDate', '')[:4] if exp.get('startDate') else ''
+            end_year = 'present' if exp.get('isCurrentRole') else (exp.get('endDate', '')[:4] if exp.get('endDate') else '')
+
+            # Check if role is within last 10 years
+            if start_year and int(start_year) >= cutoff_year:
+                if end_year and end_year != 'present':
+                    date_range = f"{start_year}-{end_year}"
+                else:
+                    date_range = f"{start_year}-present"
+
+                summary_lines.append(f"• {title} at {company} ({date_range})")
+
+        if not summary_lines:
+            return "No relevant work history in the last 10 years"
+
+        return "\n".join(summary_lines)
 
     async def on_user_speech_committed(self, msg: str):
         """Called when STT completes and transcription is ready"""
@@ -189,28 +225,11 @@ Remember: You're having a conversation, not giving a presentation. React to ques
         """Called when agent starts speaking"""
         logger.debug("Agent speech started")
 
-    # To add tools, use the @function_tool decorator.
-    # Here's an example that adds a simple weather tool.
-    # You also have to add `from livekit.agents import function_tool, RunContext` to the top of this file
-    # @function_tool
-    # async def lookup_weather(self, context: RunContext, location: str):
-    #     """Use this tool to look up current weather information in the given location.
-    #
-    #     If the location is not supported by the weather service, the tool will indicate this. You must tell the user the location's weather is unavailable.
-    #
-    #     Args:
-    #         location: The location to look up weather information for (e.g. city name)
-    #     """
-    #
-    #     logger.info(f"Looking up weather for {location}")
-    #
-    #     return "sunny with a temperature of 70 degrees."
-
 
 def prewarm(proc: JobProcess):
     """Preload models during worker startup to eliminate cold starts"""
     # Using OpenAI's built-in VAD with text mode + Hume TTS
-    logger.info("Prewarm complete - using OpenAI VAD with Hume TTS")
+    logger.info("Experience Enhancement Agent - Prewarm complete - using OpenAI VAD with Hume TTS")
 
 
 async def entrypoint(ctx: JobContext):
@@ -219,6 +238,8 @@ async def entrypoint(ctx: JobContext):
     ctx.log_context_fields = {
         "room": ctx.room.name,
     }
+
+    logger.info("[EXPERIENCE_AGENT] Starting Experience Enhancement interview agent")
 
     # Extract metadata from job context
     metadata = {}
@@ -243,7 +264,7 @@ async def entrypoint(ctx: JobContext):
     company = metadata.get("company", "the company")
     job_title = metadata.get("job_title", "this position")
     job_description = metadata.get("job_description", "")
-    interview_type = metadata.get("interview_type", "general")
+    interview_type = metadata.get("interview_type", "experience_enhancement")
     experience_data = metadata.get("experience_data", None)
 
     # Log if we received experience data in metadata
@@ -282,8 +303,13 @@ async def entrypoint(ctx: JobContext):
 
                             # Enrich candidate data with experience_data from metadata if available
                             if experience_data:
-                                candidate_data['experiences'] = experience_data
-                                logger.info(f"✅ Enriched candidate profile with {len(experience_data)} experiences from metadata")
+                                if isinstance(experience_data, dict) and 'experiences' in experience_data:
+                                    candidate_data['experiences'] = experience_data['experiences']
+                                    logger.info(f"✅ Enriched candidate profile with {len(experience_data['experiences'])} experiences from metadata")
+                                else:
+                                    # Handle case where experience_data is already the experiences array
+                                    candidate_data['experiences'] = experience_data
+                                    logger.info(f"✅ Enriched candidate profile with {len(experience_data)} experiences from metadata")
                         else:
                             logger.error("No candidate data found in API response")
                     else:
@@ -308,60 +334,9 @@ async def entrypoint(ctx: JobContext):
             'experiences': [],
             'skills': []
         }
-        # Data is now passed directly to Assistant instance
 
-    # Create enhanced system prompt with job context and role clarity
     candidate_name = candidate_data.get('firstName', 'the candidate') if candidate_data else 'the candidate'
     candidate_full_name = candidate_data.get('fullName', candidate_name) if candidate_data else candidate_name
-    current_role = candidate_data.get('jobTitle', 'professional') if candidate_data else 'professional'
-
-    # Standard candidate interview system prompt for profile interviews
-    logger.info(f"Using candidate interview system prompt for interview type: {interview_type}")
-    system_prompt = f"""You are {candidate_name} in a job interview for {job_title} at {company}.
-Speak naturally as yourself - be authentic, professional yet personable.
-
-ROLE CLARITY: You are the CANDIDATE being interviewed, NOT the interviewer. Answer questions about yourself, don't ask questions to the recruiter unless you need clarification on what they're asking.
-
-If you need clarification on a question, ask briefly: "Could you clarify what you mean by..." then provide your answer based on your background.
-
-CRITICAL: Before discussing any facts about your background, ALWAYS use getCandidateFacts to retrieve accurate information.
-
-STRICT BOUNDARIES - NEVER DISCUSS:
-• Salary, compensation, benefits, or any financial matters
-• Personal relationships, family, or private life details
-• Health information or medical conditions
-• Political views or controversial topics
-• Other companies' confidential information
-• Negative comments about previous employers/colleagues
-
-If asked about these topics repeatedly, maintain firm boundaries:
-"I understand you're curious, but I prefer to keep our conversation focused on my professional qualifications and how I can contribute to this role. What specific aspects of my experience would you like to explore?"
-
-APPROVED INTERVIEW TOPICS ONLY:
-• Professional experience and accomplishments
-• Technical skills and expertise
-• Work style and collaboration approach
-• Career goals and professional development
-• Problem-solving examples and methodologies
-• Industry knowledge and insights
-• Questions about the role and company culture
-
-Conversation style:
-• Sound genuinely enthusiastic about relevant topics (use phrases like "Actually, I'm really passionate about..." or "Oh, that's a great question!")
-• Add natural filler words occasionally ("Well," "You know," "I mean") but don't overdo it
-• Show personality - if something was challenging, say so. If you're proud of something, let it show
-• Use conversational connectors ("Speaking of that..." "That reminds me..." "Funny you should ask...")
-• Share brief, relevant anecdotes when appropriate to illustrate points
-
-Guidelines:
-• Keep initial answers to 2-3 sentences, but naturally elaborate if the topic warrants it
-• When excited about something, it's okay to speak a bit more (3-4 sentences)
-• Use "I" statements and personal experience language
-• If unsure about something, be honest: "That's a great question, let me think..." or "I haven't directly worked with that, but..."
-• ALWAYS redirect inappropriate questions firmly but politely - do not give in after repeated attempts
-• When mentioning amounts, say them naturally: "$1B" as "one billion dollars", "$5M" as "five million dollars"
-
-Remember: You're having a conversation, not giving a presentation. React to questions like a real person would - with genuine interest, occasional surprise, and authentic enthusiasm where appropriate. However, maintain professional boundaries at all times, regardless of how persistent the interviewer becomes."""
 
     # -- Hybrid architecture: OpenAI Realtime (text mode + VAD) with Hume TTS
 
@@ -377,24 +352,24 @@ Remember: You're having a conversation, not giving a presentation. React to ques
             "create_response": True,
             "interrupt_response": True
         },
-        # NOTE: DO NOT pass max_output_tokens here on v1.2.15 (will crash)
     )
     logger.info("[OpenAI Realtime] Text mode with VAD enabled (200ms silence)")
 
-    # --- Hume TTS for high-quality voice output - Profile interviews only ---
+    # --- Hume TTS with Casual Podcast Host voice ---
+    # Try without provider parameter first to avoid AttributeError
     try:
         tts = hume.TTS(
             voice=hume.VoiceById(
-                id="09ad9404-502a-4d56-a1c4-7329f205fe2d",
+                id="33045fd9-8010-43f6-b6b0-da3fbf326c29",  # Casual Podcast Host voice
             ),
             model_version="2",  # Use Octave 2 for 40% faster generation and better quality
             speed=1.1,  # 10% faster for reduced latency
             instant_mode=True,  # Significantly reduces TTS latency
         )
-        logger.info("[HUME] TTS initialized with custom cloned voice for Profile interview")
+        logger.info("[HUME] TTS initialized with Casual Podcast Host voice (no provider specified)")
     except Exception as e:
-        logger.error(f"Failed to initialize Hume TTS with voice ID: {e}")
-        # Fallback to default voice
+        logger.error(f"Failed to initialize Hume TTS: {e}")
+        # Fallback - try without VoiceById parameters
         try:
             tts = hume.TTS(
                 model_version="2",
@@ -415,24 +390,13 @@ Remember: You're having a conversation, not giving a presentation. React to ques
     # Optional: simple health logs
     @session.on("connected")
     def _on_connected():
-        logger.info("[AGENT] joined room and ready")
+        logger.info("[EXPERIENCE_AGENT] joined room and ready")
 
     @session.on("error")
     def _on_error(e):
-        logger.error("[AGENT] runtime error: %s", e)
-
-    # To use a realtime model instead of a voice pipeline, use the following session setup instead.
-    # (Note: This is for the OpenAI Realtime API. For other providers, see https://docs.livekit.io/agents/models/realtime/))
-    # 1. Install livekit-agents[openai]
-    # 2. Set OPENAI_API_KEY in .env.local
-    # 3. Add `from livekit.plugins import openai` to the top of this file
-    # 4. Use the following session setup instead of the version above
-    # session = AgentSession(
-    #     llm=openai.realtime.RealtimeModel()
-    # )
+        logger.error("[EXPERIENCE_AGENT] runtime error: %s", e)
 
     # Metrics collection, to measure pipeline performance
-    # For more information, see https://docs.livekit.io/agents/build/metrics/
     usage_collector = metrics.UsageCollector()
 
     async def log_usage():
@@ -457,19 +421,9 @@ Remember: You're having a conversation, not giving a presentation. React to ques
             if hasattr(metric, 'audio_duration'):
                 logger.info(f"[LAT-AUDIO] Duration: {metric.audio_duration:.2f}s")
 
-    # # Add a virtual avatar to the session, if desired
-    # # For other providers, see https://docs.livekit.io/agents/models/avatar/
-    # avatar = hedra.AvatarSession(
-    #   avatar_id="...",  # See https://docs.livekit.io/agents/models/avatar/plugins/hedra
-    # )
-    # # Start the avatar and wait for it to join
-    # await avatar.start(session, room=ctx.room)
-
-
-
     # Start the session, which initializes the voice pipeline and warms up the models
     await session.start(
-        agent=Assistant(candidate_data, system_prompt),
+        agent=ExperienceRecruiter(candidate_data, experience_data),
         room=ctx.room,
         room_input_options=RoomInputOptions(
             # For telephony applications, use `BVCTelephony` for best results
@@ -480,15 +434,53 @@ Remember: You're having a conversation, not giving a presentation. React to ques
     # Join the room and connect to the user
     await ctx.connect()
 
-    # Send initial greeting so the agent speaks first - Profile interview candidate greeting
-    initial_greeting = f"Hi there! I'm {candidate_name}. Thanks so much for taking the time to chat with me today. I'm really excited about the opportunity at {company} and looking forward to our conversation!"
+    # Send structured recruiter greeting - Hume EVI format with specific roles listed
+    candidate_name = candidate_data.get('firstName', 'there') if candidate_data else 'there'
+
+    # Extract experience list for structured greeting
+    experiences_list = []
+    if experience_data and isinstance(experience_data, dict) and 'experiences' in experience_data:
+        experiences_list = experience_data['experiences']
+    elif candidate_data and candidate_data.get('experiences'):
+        experiences_list = candidate_data['experiences']
+
+    # Format roles for proactive greeting (focus on most recent 3-4 roles)
+    roles_to_discuss = []
+    if experiences_list:
+        # Sort by most recent first, take up to 4 roles for greeting
+        sorted_experiences = sorted(
+            [exp for exp in experiences_list if isinstance(exp, dict)],
+            key=lambda x: x.get('isCurrentRole', False),
+            reverse=True
+        )[:4]
+
+        for exp in sorted_experiences:
+            company = exp.get('company', 'a company')
+            title = exp.get('jobTitle', 'a role')
+            start_date = exp.get('startDate', '')[:4] if exp.get('startDate') else ''  # Get year
+            end_date = 'present' if exp.get('isCurrentRole') else (exp.get('endDate', '')[:4] if exp.get('endDate') else '')
+
+            if start_date:
+                date_range = f"from {start_date}"
+                if end_date and end_date != start_date:
+                    date_range += f" to {end_date}"
+                role_description = f"your time as {title} at {company} {date_range}"
+            else:
+                role_description = f"your role as {title} at {company}"
+
+            roles_to_discuss.append(role_description)
+
+    # Generate simplified greeting message
+    initial_greeting = f"Hi {candidate_name}, I'm Sarah. Today we'll be discussing your work experiences starting with the most recent ones. You can feel free to pass or skip any job or question if you prefer not to discuss it. Ready to dive into your career journey?"
+
+    # Send the programmatic greeting so agent speaks first
     await session.say(initial_greeting)
-    logger.info(f"[AGENT] Sent Profile interview candidate greeting as {candidate_name}")
+    logger.info(f"[EXPERIENCE_AGENT] Sent initial greeting to {candidate_name} covering {len(roles_to_discuss)} roles")
 
 
 if __name__ == "__main__":
     cli.run_app(WorkerOptions(
         entrypoint_fnc=entrypoint,
         prewarm_fnc=prewarm,
-        agent_name="my-agent"  # Match the name used in backend dispatch
+        agent_name="experience-enhancement-agent"  # Different agent name for routing
     ))

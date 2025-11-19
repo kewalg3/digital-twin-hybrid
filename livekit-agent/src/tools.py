@@ -1,36 +1,26 @@
-from livekit.agents import function_tool, RunContext
+from livekit.agents import RunContext
 import logging
 import time
 
 logger = logging.getLogger("tools")
 
-# Global variables to store candidate data and job context fetched from API
-CANDIDATE_DATA = None
-JOB_DATA = None
-
-def set_candidate_data(data):
-    """Set the candidate data fetched from the API"""
-    global CANDIDATE_DATA
-    CANDIDATE_DATA = data
-    logger.info(f"Candidate data set for: {data.get('fullName', 'Unknown') if data else 'None'}")
-
-def set_job_context(data):
-    """Set the job context data"""
-    global JOB_DATA
-    JOB_DATA = data
-    logger.info(f"Job context set for: {data.get('job_title', 'Unknown')} at {data.get('company', 'Unknown')}")
-
-@function_tool()
-async def getCandidateFacts(
+# Regular async function that processes candidate queries
+# This will be wrapped in a function_tool inside Assistant.__init__
+async def process_candidate_query(
     context: RunContext,
-    query: str
+    query: str,
+    candidate_data: dict = None
 ) -> dict:
-    """Get facts about the candidate's resume.
+    """Process queries about the candidate's resume.
 
     Args:
+        context: LiveKit RunContext
         query: What to look up (e.g. "Python experience", "education", "skills", "summary")
+        candidate_data: The candidate's profile data
     """
-    global CANDIDATE_DATA
+    # Use the passed candidate data
+    CANDIDATE_DATA = candidate_data
+    JOB_DATA = None  # Not used anymore
 
     # Log tool usage for monitoring with timing
     tool_start = time.time()
@@ -117,13 +107,19 @@ async def getCandidateFacts(
         if experiences:
             exp_list = []
             for exp in experiences:
-                exp_info = {
-                    "company": exp.get('company', 'Unknown'),
-                    "role": exp.get('jobTitle', 'Unknown'),
-                    "dates": f"{exp.get('startDate', '')} - {'Present' if exp.get('isCurrentRole') else exp.get('endDate', '')}",
-                    "description": exp.get('description', '')
-                }
-                exp_list.append(exp_info)
+                # Ensure exp is a dictionary, not a string
+                if isinstance(exp, dict):
+                    exp_info = {
+                        "company": exp.get('company', 'Unknown'),
+                        "role": exp.get('jobTitle', 'Unknown'),
+                        "dates": f"{exp.get('startDate', '')} - {'Present' if exp.get('isCurrentRole') else exp.get('endDate', '')}",
+                        "description": exp.get('description', '')
+                    }
+                    exp_list.append(exp_info)
+                else:
+                    # Handle case where exp is a string or unexpected type
+                    logger.warning(f"Unexpected experience format: {type(exp)} - {exp}")
+                    exp_list.append({"company": "Unknown", "role": str(exp), "dates": "", "description": ""})
             logger.info(f"[TOOL] Result: Found {len(exp_list)} work experiences")
             result = {"found": True, "facts": exp_list}
         else:
