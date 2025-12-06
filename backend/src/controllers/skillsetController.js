@@ -1,5 +1,5 @@
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+
+const prisma = require('../lib/prisma');
 
 class SkillsetController {
   // Add skillset via autocomplete
@@ -46,14 +46,15 @@ class SkillsetController {
     }
   }
 
-  // Get user's skillsets
+  // Get user's skillsets (authenticated)
   async getUserSkillsets(req, res) {
     try {
-      const userId = req.user?.userId || req.query.userId;
+      // Now requires auth, so use req.user.userId
+      const userId = req.user?.userId;
 
       if (!userId) {
-        return res.status(400).json({
-          error: 'User ID is required'
+        return res.status(401).json({
+          error: 'User not authenticated'
         });
       }
 

@@ -1,9 +1,9 @@
 const express = require('express');
-const { PrismaClient } = require('@prisma/client');
+
 const { v4: uuidv4 } = require('uuid');
 const router = express.Router();
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // IMPORTANT: Specific routes must come BEFORE wildcard routes!
 
@@ -32,6 +32,11 @@ router.get('/profile/:userId', async (req, res) => {
         willingToRelocate: true,
         openToContract: true,
         // Don't expose email or phone in public profile
+        // Voice preferences for interview TTS
+        profileVoiceId: true,
+        profileVoiceType: true,
+        clonedVoiceId: true,
+        voiceCloneStatus: true,
         resumes: {
           select: {
             id: true,
@@ -126,7 +131,12 @@ router.get('/profile/:userId', async (req, res) => {
         ...user.software.map(sw => ({ ...sw, type: 'software' }))
       ],
       // Include interview insights for richer context
-      interviewInsights: user.eviInterviewSessions || []
+      interviewInsights: user.eviInterviewSessions || [],
+      // Include voice preferences for TTS
+      profileVoiceId: user.profileVoiceId,
+      profileVoiceType: user.profileVoiceType,
+      clonedVoiceId: user.clonedVoiceId,
+      voiceCloneStatus: user.voiceCloneStatus
     };
 
     console.log('✅ Public profile fetched successfully for:', userId);

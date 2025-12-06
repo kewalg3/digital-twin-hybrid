@@ -5,10 +5,10 @@
 
 const express = require('express');
 const { body, validationResult } = require('express-validator');
-const { PrismaClient } = require('@prisma/client');
+
 const fetch = require('node-fetch');
 const router = express.Router();
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // ============================================================================
 // SECTION 1: Simplified Approach - Use Existing Working Tool

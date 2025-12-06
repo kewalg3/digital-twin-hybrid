@@ -307,7 +307,7 @@ export default function ProfileLiveKitInterviewDialog({
             transcript: transcriptForBackend,
             duration: currentTime,
             interviewType: interviewType, // Pass interview type for proper processing
-            experienceData: experienceData // Pass experience data for context
+            experienceData: experienceData || {} // Pass experience data for context, default to empty object
           })
         });
         
@@ -771,144 +771,8 @@ export default function ProfileLiveKitInterviewDialog({
       };
     }, [room]);
 
-    return (
-      <>
-        <RoomAudioRenderer />
-        <div className="space-y-6">
-          {isConnecting ? (
-            // Show loading state while agent is connecting
-            <div className="text-center space-y-4">
-              <div className="relative inline-flex">
-                <div className="w-24 h-24 rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center">
-                  <div className="w-8 h-8 border-4 border-white border-t-transparent rounded-full animate-spin" />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <h3 className="text-xl font-semibold">Connecting...</h3>
-                <p className="text-muted-foreground">Please wait while we set up your interview</p>
-              </div>
-            </div>
-          ) : (
-            // Show normal interview UI after agent is connected
-            <div className="text-center space-y-4">
-              {/* Voice Recording Indicator */}
-              <div className="relative inline-flex">
-                <div className={`w-24 h-24 rounded-full flex items-center justify-center transition-all duration-300 ${
-                  isRecording && !aiIsSpeaking
-                    ? 'bg-gradient-to-br from-blue-500 to-blue-600 shadow-lg shadow-blue-500/30'
-                    : aiIsSpeaking
-                    ? 'bg-gradient-to-br from-purple-500 to-purple-600 shadow-lg shadow-purple-500/30'
-                    : 'bg-muted'
-                }`}>
-                  {aiIsSpeaking ? (
-                    <Volume2 className="w-10 h-10 text-white animate-pulse" />
-                  ) : isRecording ? (
-                    <Mic className="w-10 h-10 text-white" />
-                  ) : (
-                    <MicOff className="w-10 h-10 text-muted-foreground" />
-                  )}
-                </div>
-                {(isRecording || aiIsSpeaking) && (
-                  <span className="absolute flex h-full w-full">
-                    <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                      aiIsSpeaking ? 'bg-purple-400' : 'bg-blue-400'
-                    }`}></span>
-                  </span>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <h3 className="text-xl font-semibold">
-                  {aiIsSpeaking
-                    ? `${candidateName.split(' ')[0]} is Speaking`
-                    : isListening
-                    ? "Listening..."
-                    : "Ready"}
-                </h3>
-                <div className="flex items-center justify-center gap-4">
-                  <div className="flex items-center gap-2">
-                    <Clock className="w-4 h-4" />
-                    <span className="text-lg font-mono">{formatTime(currentTime)}</span>
-                  </div>
-                  <Badge variant="outline" className="text-xs">
-                    No Time Limit
-                  </Badge>
-                </div>
-              </div>
-            </div>
-          )}
-
-      {error && (
-        <Card className="p-4 bg-red-50 border-red-200">
-          <div className="flex items-center gap-2 text-red-600">
-            <AlertCircle className="w-4 h-4" />
-            <p className="text-sm">{error}</p>
-          </div>
-        </Card>
-      )}
-
-      {!isConnecting && (
-        <>
-          <Card className="p-4 bg-muted/30">
-            <h4 className="font-medium mb-3 flex items-center gap-2">
-              <FileText className="w-4 h-4" />
-              Live Conversation
-            </h4>
-            <div ref={transcriptContainerRef} className="space-y-4 h-64 overflow-y-auto">
-              {transcript.map((message, index) => (
-                <div key={index} className={`flex gap-3 ${
-                  message.type === 'assistant_message' ? 'justify-start' : 'justify-end'
-                }`}>
-                  <div className={`max-w-[80%] p-3 rounded-lg ${
-                    message.type === 'assistant_message'
-                      ? 'bg-primary/10 border border-primary/20'
-                      : 'bg-blue-500 text-white'
-                  }`}>
-                    <div className="text-xs font-medium mb-1 opacity-80">
-                      {message.type === 'assistant_message' ? candidateName : 'Recruiter'}
-                    </div>
-                    <div className="text-sm">
-                      {message.content}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-            {aiIsSpeaking && (
-              <div className="mt-2 flex justify-start">
-                <div className="bg-primary/5 border border-primary/20 p-2 rounded-lg">
-                  <div className="flex items-center gap-2 text-primary">
-                    <Volume2 className="w-4 h-4 animate-pulse" />
-                    <span className="text-sm">{candidateName} is speaking...</span>
-                  </div>
-                </div>
-              </div>
-            )}
-          </Card>
-
-          {/* Single Complete Interview Button */}
-          <div className="flex justify-center">
-            <Button
-              onClick={handleCompleteInterview}
-              size="lg"
-              className="bg-gradient-to-r from-primary to-blue-600 hover:opacity-90"
-              disabled={transcript.length === 0 || stage === 'saving'}
-            >
-              {stage === 'saving' ? (
-                <>
-                  <div className="w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  Saving Interview...
-                </>
-              ) : (
-                'Complete Interview'
-              )}
-            </Button>
-          </div>
-        </>
-      )}
-        </div>
-      </>
-    );
+    // Return null as this component only handles logic/hooks
+    return null;
   };
 
   const renderRecordingStage = () => {
@@ -923,6 +787,118 @@ export default function ProfileLiveKitInterviewDialog({
           video={false} // Disable video
         >
           <LiveKitRoomContent />
+          <RoomAudioRenderer />
+          <div className="space-y-6">
+            {isConnecting ? (
+              // Show loading state while agent is connecting
+              <div className="text-center space-y-4">
+                <div className="relative inline-flex">
+                  <div className="w-24 h-24 rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center">
+                    <div className="w-8 h-8 border-4 border-white border-t-transparent rounded-full animate-spin" />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-xl font-semibold">Connecting...</h3>
+                  <p className="text-muted-foreground">Please wait while we set up your interview</p>
+                </div>
+              </div>
+            ) : (
+              // Show normal interview UI after agent is connected
+              <div className="text-center space-y-4">
+                {/* Voice Recording Indicator */}
+                <div className="relative inline-flex">
+                  <div className={`w-24 h-24 rounded-full flex items-center justify-center transition-all duration-300 ${
+                    isRecording || aiIsSpeaking
+                      ? 'bg-gradient-to-br from-purple-500 to-purple-600 shadow-lg shadow-purple-500/30'
+                      : 'bg-muted'
+                  }`}>
+                    <Mic className={`w-10 h-10 ${
+                      aiIsSpeaking || isRecording ? 'text-white' : 'text-muted-foreground'
+                    }`} />
+                  </div>
+                  {(isRecording || aiIsSpeaking) && (
+                    <span className="absolute flex h-full w-full">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 bg-purple-400"></span>
+                    </span>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <h3 className="text-xl font-semibold">
+                    Live Interview
+                  </h3>
+                  <div className="flex items-center justify-center gap-4">
+                    <div className="flex items-center gap-2">
+                      <Clock className="w-4 h-4" />
+                      <span className="text-lg font-mono">{formatTime(currentTime)}</span>
+                    </div>
+                    <Badge variant="outline" className="text-xs">
+                      No Time Limit
+                    </Badge>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {error && (
+              <Card className="p-4 bg-red-50 border-red-200">
+                <div className="flex items-center gap-2 text-red-600">
+                  <AlertCircle className="w-4 h-4" />
+                  <p className="text-sm">{error}</p>
+                </div>
+              </Card>
+            )}
+
+            {!isConnecting && (
+              <>
+                <Card className="p-4 bg-muted/30">
+                  <h4 className="font-medium mb-3 flex items-center gap-2">
+                    <FileText className="w-4 h-4" />
+                    Live Conversation
+                  </h4>
+                  <div ref={transcriptContainerRef} className="space-y-4 h-64 overflow-y-auto">
+                    {transcript.map((message, index) => (
+                      <div key={index} className={`flex gap-3 ${
+                        message.type === 'assistant_message' ? 'justify-start' : 'justify-end'
+                      }`}>
+                        <div className={`max-w-[80%] p-3 rounded-lg ${
+                          message.type === 'assistant_message'
+                            ? 'bg-primary/10 border border-primary/20'
+                            : 'bg-blue-500 text-white'
+                        }`}>
+                          <div className="text-xs font-medium mb-1 opacity-80">
+                            {message.type === 'assistant_message' ? candidateName : 'Recruiter'}
+                          </div>
+                          <div className="text-sm">
+                            {message.content}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+
+                {/* Single Complete Interview Button */}
+                <div className="flex justify-center">
+                  <Button
+                    onClick={handleCompleteInterview}
+                    size="lg"
+                    className="bg-gradient-to-r from-primary to-blue-600 hover:opacity-90"
+                    disabled={transcript.length === 0 || stage === 'saving'}
+                  >
+                    {stage === 'saving' ? (
+                      <>
+                        <div className="w-4 h-4 mr-2 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        Saving Interview...
+                      </>
+                    ) : (
+                      'Complete Interview'
+                    )}
+                  </Button>
+                </div>
+              </>
+            )}
+          </div>
         </LiveKitRoom>
       );
     }

@@ -3,3 +3,6 @@
 
 [agent]
   id = "CA_mdfPDJaoqNte"
+
+[env]
+  CARTESIA_API_KEY = "sk-prod-QCyXM3B4K3QBu8x2-M6MXr4F"

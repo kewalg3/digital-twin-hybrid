@@ -21,14 +21,15 @@ interface OnboardingLayoutProps {
 
 const stepNames = [
   "Resume Upload",
-  "Personal Information", 
+  "Personal Information",
   "Experience Enhancement",
   "Work Style & Career Goals",
-  "Skills Intelligence"
+  "Skills Intelligence",
+  "Voice Clone"
 ];
 
 const stepIcons = [
-  "📄", "👤", "📈", "🎯", "🧠"
+  "📄", "👤", "📈", "🎯", "🧠", "🎤"
 ];
 
 export default function OnboardingLayout({ 

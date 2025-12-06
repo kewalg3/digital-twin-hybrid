@@ -3,21 +3,28 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Mic, Square, Play, Pause } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useAuthStore } from "@/store/authStore";
 
 interface VoiceRecorderProps {
   onRecordingComplete?: (audioBlob: Blob) => void;
+  onCloneComplete?: (voiceId: string) => void;
 }
 
-export default function VoiceRecorder({ onRecordingComplete }: VoiceRecorderProps) {
+export default function VoiceRecorder({ onRecordingComplete, onCloneComplete }: VoiceRecorderProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const [recordingTime, setRecordingTime] = useState(0);
-  
+  const [isCloning, setIsCloning] = useState(false);
+  const [clonedVoiceId, setClonedVoiceId] = useState<string | null>(null);
+
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const { toast } = useToast();
+
+  // Sample text for users to read during recording
+  const sampleText = "Hello! I'm excited to discuss my professional experience and career goals with you. I look forward to sharing how my skills and background align with your team's needs.";
 
   const startRecording = async () => {
     try {
@@ -29,11 +36,16 @@ export default function VoiceRecorder({ onRecordingComplete }: VoiceRecorderProp
         chunks.push(event.data);
       };
 
-      mediaRecorder.onstop = () => {
-        const blob = new Blob(chunks, { type: "audio/wav" });
+      mediaRecorder.onstop = async () => {
+        // Use the actual MIME type from MediaRecorder instead of lying about it
+        const mimeType = mediaRecorder.mimeType || 'video/webm';
+        const blob = new Blob(chunks, { type: mimeType });
         setAudioBlob(blob);
         onRecordingComplete?.(blob);
         stream.getTracks().forEach(track => track.stop());
+
+        // Immediately start cloning process
+        await cloneVoice(blob);
       };
 
       mediaRecorderRef.current = mediaRecorder;
@@ -59,18 +71,69 @@ export default function VoiceRecorder({ onRecordingComplete }: VoiceRecorderProp
     }
   };
 
+  const cloneVoice = async (audioBlob: Blob) => {
+    setIsCloning(true);
+
+    try {
+      const formData = new FormData();
+      // Use appropriate filename based on MIME type
+      const extension = audioBlob.type.includes('webm') ? 'webm' :
+                       audioBlob.type.includes('mp4') ? 'mp4' : 'wav';
+
+      // Convert Blob to File object - multer requires a proper File, not just a Blob
+      const audioFile = new File([audioBlob], `voice_sample.${extension}`, {
+        type: audioBlob.type,
+        lastModified: Date.now()
+      });
+      formData.append('audio', audioFile);
+
+      const token = useAuthStore.getState().token;
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/voice/clone`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+        body: formData
+      });
+
+      if (!response.ok) {
+        throw new Error(`Voice cloning failed: ${response.status}`);
+      }
+
+      const result = await response.json();
+      const voiceId = result.voiceData?.voiceId || 'cloned_voice';
+
+      setClonedVoiceId(voiceId);
+      onCloneComplete?.(voiceId);
+
+      toast({
+        title: "Voice cloned successfully!",
+        description: "Your voice has been processed and is ready to use.",
+      });
+    } catch (error) {
+      console.error('Voice cloning failed:', error);
+      toast({
+        title: "Voice cloning failed",
+        description: "Failed to process your voice. Please try recording again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsCloning(false);
+    }
+  };
+
   const stopRecording = () => {
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.stop();
       setIsRecording(false);
-      
+
       if (timerRef.current) {
         clearInterval(timerRef.current);
       }
 
       toast({
         title: "Recording completed",
-        description: "Your voice sample has been saved",
+        description: "Processing your voice for cloning...",
       });
     }
   };
@@ -132,6 +195,19 @@ export default function VoiceRecorder({ onRecordingComplete }: VoiceRecorderProp
           </div>
         )}
 
+        {/* Sample Text for Recording */}
+        {isRecording && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-2">
+            <h4 className="font-semibold text-blue-900">Please read this text clearly:</h4>
+            <p className="text-blue-800 text-lg leading-relaxed">
+              {sampleText}
+            </p>
+            <p className="text-blue-600 text-sm">
+              Speak naturally and clearly for best voice cloning results.
+            </p>
+          </div>
+        )}
+
         {/* Controls */}
         <div className="flex justify-center space-x-4">
           {!isRecording ? (
@@ -175,7 +251,21 @@ export default function VoiceRecorder({ onRecordingComplete }: VoiceRecorderProp
           )}
         </div>
 
-        {audioBlob && (
+        {/* Status Messages */}
+        {isCloning && (
+          <div className="text-sm text-blue-600 font-medium flex items-center gap-2">
+            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+            Processing your voice...
+          </div>
+        )}
+
+        {clonedVoiceId && !isCloning && (
+          <div className="text-sm text-green-600 font-medium">
+            ✓ Voice cloned successfully
+          </div>
+        )}
+
+        {audioBlob && !clonedVoiceId && !isCloning && (
           <div className="text-sm text-success font-medium">
             ✓ Voice recording ready
           </div>

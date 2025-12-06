@@ -6,6 +6,7 @@ import VoiceRecorder from "@/components/VoiceRecorder";
 import ProfilePhotoUpload from "@/components/ProfilePhotoUpload";
 import ExperienceCard from "@/components/ExperienceCard";
 import WorkStyleInterviewDialog from "@/components/WorkStyleInterviewDialog";
+import WorkStyleLiveKitInterviewDialog from "@/components/WorkStyleLiveKitInterviewDialog";
 import EVIInterviewDialog from "@/components/EVIInterviewDialog";
 import ExperienceLiveKitInterviewDialog from "@/components/ExperienceLiveKitInterviewDialog";
 import { Button } from "@/components/ui/button";
@@ -18,12 +19,12 @@ import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Upload, FileText, Briefcase, Target, ChevronUp, ChevronDown, Loader2, CheckCircle } from "lucide-react";
+import { Upload, FileText, Briefcase, Target, ChevronUp, ChevronDown, Loader2, CheckCircle, Mic, Volume2, StopCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { resumeApi, onboardingApi } from "@/services/api";
 import { useAuthStore } from "@/store/authStore";
 
-const TOTAL_STEPS = 5;
+const TOTAL_STEPS = 6;
 
 interface OnboardingData {
   resume?: File;
@@ -61,6 +62,12 @@ interface OnboardingData {
     industries: string[];
   };
   skills: string[];
+  voiceClone: {
+    voiceType: string; // "male", "female", or "cloned"
+    voiceId?: string; // Cartesia voice ID
+    audioSample?: Blob; // For voice cloning
+    isProcessing?: boolean;
+  };
   verificationComplete: boolean;
 }
 
@@ -131,6 +138,7 @@ export default function BetaOnboarding() {
   const [currentStep, setCurrentStep] = useState(1);
   const [expandedCard, setExpandedCard] = useState<number | null>(null);
   const [showWorkStyleDialog, setShowWorkStyleDialog] = useState(false);
+  const [showWorkStyleLiveKitDialog, setShowWorkStyleLiveKitDialog] = useState(false);
   const [sortColumn, setSortColumn] = useState<'years' | 'lastUsed' | null>(null);
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [isLoading, setIsLoading] = useState(false);
@@ -152,7 +160,104 @@ export default function BetaOnboarding() {
   const [showEVIInterviewDialog, setShowEVIInterviewDialog] = useState(false);
   const [showLiveKitInterviewDialog, setShowLiveKitInterviewDialog] = useState(false);
   const [selectedExperience, setSelectedExperience] = useState<any>(null);
-  
+
+  // Voice playback state for preview functionality
+  const [playingVoice, setPlayingVoice] = useState<string | null>(null);
+  const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null);
+
+  // Cartesia voice IDs for male and female voices
+  const VOICE_IDS = {
+    male: '729651dc-c6c3-4ee5-97fa-350da1f88600',
+    female: '829ccd10-f8b3-43cd-b8a0-4aeaa81f3b30'
+  };
+
+  // Sample text for voice preview
+  const PREVIEW_TEXT = "Hello! I'm excited to discuss my professional experience and career goals with you. I look forward to sharing how my skills and background align with your team's needs.";
+
+  // Voice playback function
+  const playVoiceSample = async (voiceType: 'male' | 'female' | 'cloned') => {
+    // Stop current audio if playing
+    if (audioElement) {
+      audioElement.pause();
+      audioElement.currentTime = 0;
+    }
+
+    if (playingVoice === voiceType) {
+      setPlayingVoice(null);
+      return;
+    }
+
+    try {
+      setPlayingVoice(voiceType);
+
+      // FIXED: Use the specific voice for THIS button
+      let voiceId;
+      if (voiceType === 'cloned') {
+        voiceId = data.voiceClone.voiceId;  // User's cloned voice
+        if (!voiceId) {
+          toast({
+            title: "No cloned voice",
+            description: "Please record your voice first to preview it.",
+            variant: "destructive"
+          });
+          setPlayingVoice(null);
+          return;
+        }
+      } else {
+        // Use the specific male/female voice, NOT the selected one
+        voiceId = VOICE_IDS[voiceType];
+      }
+
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/voice/preview`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${useAuthStore.getState().token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          voiceId,
+          text: PREVIEW_TEXT
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to generate voice preview');
+      }
+
+      const audioBlob = await response.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+
+      audio.onended = () => {
+        setPlayingVoice(null);
+        setAudioElement(null);
+        URL.revokeObjectURL(audioUrl);
+      };
+
+      audio.onerror = () => {
+        setPlayingVoice(null);
+        setAudioElement(null);
+        URL.revokeObjectURL(audioUrl);
+        toast({
+          title: "Playback failed",
+          description: "Could not play voice preview",
+          variant: "destructive"
+        });
+      };
+
+      setAudioElement(audio);
+      await audio.play();
+    } catch (error) {
+      console.error('Failed to play voice sample:', error);
+      setPlayingVoice(null);
+      toast({
+        title: "Preview failed",
+        description: "Could not load voice preview",
+        variant: "destructive"
+      });
+    }
+  };
+
   // Request deduplication to prevent excessive API calls
   const [lastFetchTimes, setLastFetchTimes] = useState<{[key: string]: number}>({});
   const FETCH_COOLDOWN = 2000; // 2 seconds cooldown between identical requests
@@ -201,8 +306,52 @@ export default function BetaOnboarding() {
       industries: [],
     },
     skills: [],
+    voiceClone: {
+      voiceType: "",
+      voiceId: "",
+      audioSample: undefined,
+      isProcessing: false,
+    },
     verificationComplete: false,
   });
+
+  // Load user's voice settings on component mount
+  useEffect(() => {
+    const loadUserVoiceSettings = async () => {
+      if (!user?.id || !useAuthStore.getState().token) return;
+
+      try {
+        const response = await fetch(
+          `${import.meta.env.VITE_API_URL}/voice/status`,
+          {
+            headers: {
+              'Authorization': `Bearer ${useAuthStore.getState().token}`,
+              'Content-Type': 'application/json',
+            },
+          }
+        );
+
+        if (response.ok) {
+          const result = await response.json();
+          if (result.success && result.voiceData.hasClonedVoice) {
+            console.log('🎤 Loading existing voice settings:', result.voiceData);
+            setData(prev => ({
+              ...prev,
+              voiceClone: {
+                ...prev.voiceClone,
+                voiceType: result.voiceData.selectedType || 'cloned',
+                voiceId: result.voiceData.clonedVoiceId
+              }
+            }));
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load voice settings:', error);
+      }
+    };
+
+    loadUserVoiceSettings();
+  }, [user?.id]);
 
   // Determine current step based on database progress
   const determineCurrentStep = (onboardingStatus: any): number => {
@@ -320,6 +469,61 @@ export default function BetaOnboarding() {
       setIsLoading(false);
     }
 
+    // Save voice clone data when navigating from step 6 (Voice Clone)
+    if (currentStep === 6) {
+      const userIdToSave = currentUserId || user?.id;
+      if (!userIdToSave) {
+        toast({
+          title: "Save failed",
+          description: "User ID not found. Please try logging in again.",
+          variant: "destructive"
+        });
+        return;
+      }
+
+      setIsLoading(true);
+      try {
+        console.log('💾 Saving voice clone data:', data.voiceClone);
+
+        // Save voice selection preferences
+        if (data.voiceClone.voiceType && data.voiceClone.voiceId) {
+          const response = await fetch(`${import.meta.env.VITE_API_URL}/voice/select`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${useAuthStore.getState().token}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              voiceType: data.voiceClone.voiceType,
+              voiceId: data.voiceClone.voiceId,
+            }),
+          });
+
+          if (!response.ok) {
+            throw new Error('Failed to select voice');
+          }
+
+          const result = await response.json();
+          console.log('✅ Voice selected successfully:', result);
+        }
+
+        toast({
+          title: "Voice preferences saved!",
+          description: "Your voice selection has been saved successfully.",
+        });
+      } catch (error) {
+        console.error('❌ Failed to save voice clone data:', error);
+        toast({
+          title: "Save failed",
+          description: "Failed to save voice preferences. Please try again.",
+          variant: "destructive"
+        });
+        setIsLoading(false);
+        return;
+      }
+      setIsLoading(false);
+    }
+
     if (currentStep < TOTAL_STEPS) {
       setCurrentStep(currentStep + 1);
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -371,8 +575,8 @@ export default function BetaOnboarding() {
     
     // For forward navigation, check mandatory steps
     if (step > currentStep) {
-      // If trying to go to steps 3, 4, or 5
-      if (step >= 3 && step <= 5) {
+      // If trying to go to steps 3, 4, 5, or 6
+      if (step >= 3 && step <= 6) {
         // Check if mandatory steps (1 and 2) are completed
         if (!hasCompletedMandatorySteps()) {
           // Provide specific feedback about what's missing
@@ -448,6 +652,8 @@ export default function BetaOnboarding() {
         return true; // AI interview is optional
       case 5:
         return true; // Skills Intelligence is optional
+      case 6:
+        return !!data.voiceClone.voiceType; // Voice type must be selected
       default:
         return true;
     }
@@ -1633,38 +1839,9 @@ export default function BetaOnboarding() {
                     'Refresh Experiences'
                   )}
                 </Button>
-                {/* LiveKit Interview Button - Hidden for production release */}
-                {false && (
                 <Button
                   onClick={() => {
                     setShowLiveKitInterviewDialog(true);
-                    setIsCombinedInterview(true);
-                    // Create a combined job object with all experiences
-                    const combinedJob = {
-                      title: 'Combined Interview',
-                      company: 'All Experiences',
-                      duration: '',
-                      location: '',
-                      description: 'Interview covering all work experiences',
-                      skills: [],
-                      software: [],
-                      aiSuggestedSkills: [],
-                      aiSuggestedSoftware: [],
-                      allExperiences: parsedExperiences
-                    };
-                    setSelectedExperience(combinedJob);
-                  }}
-                  className="bg-green-600 hover:bg-green-700"
-                  size="sm"
-                  disabled={!parsedExperiences || parsedExperiences.length === 0}
-                >
-                  {combinedInterviewCompleted ? 'Redo Interview LK' : 'Start Interview LK'}
-                </Button>
-                )}
-                <Button
-                  onClick={() => {
-                    // Use the existing combined interview dialog
-                    setShowEVIInterviewDialog(true);
                     setIsCombinedInterview(true);
                     // Create a combined job object with all experiences
                     const combinedJob = {
@@ -1843,7 +2020,8 @@ export default function BetaOnboarding() {
                 job={selectedExperience}
                 onInterviewComplete={() => {
                   setCombinedInterviewCompleted(true);
-                  setShowLiveKitInterviewDialog(false);
+                  // Don't close dialog - let user see the insights
+                  // setShowLiveKitInterviewDialog(false); // Removed to show insights
                   setIsCombinedInterview(false);
                   setSelectedExperience(null);
                   // Refresh all interview statuses
@@ -1886,20 +2064,12 @@ export default function BetaOnboarding() {
                 </div>
 
                 <Button
-                  onClick={() => setShowWorkStyleDialog(true)}
-                  className={hasCompletedWorkStyleInterview
-                    ? "w-full bg-transparent border border-emerald-500 text-emerald-700 hover:bg-emerald-50 transition-all duration-200 hover:scale-105"
-                    : "w-full bg-gradient-primary hover:opacity-90"}
+                  onClick={() => setShowWorkStyleLiveKitDialog(true)}
+                  className="w-full bg-gradient-primary hover:opacity-90"
                   size="lg"
                 >
-                  {hasCompletedWorkStyleInterview ? (
-                    <>
-                      <CheckCircle className="w-4 h-4 mr-2" />
-                      Redo Interview
-                    </>
-                  ) : (
-                    'Start Interview'
-                  )}
+                  <Mic className="w-4 h-4 mr-2" />
+                  Start Interview
                 </Button>
               </Card>
             </div>
@@ -1907,6 +2077,17 @@ export default function BetaOnboarding() {
             <WorkStyleInterviewDialog
               isOpen={showWorkStyleDialog}
               onClose={() => setShowWorkStyleDialog(false)}
+              onInterviewComplete={() => {
+                // Refresh work style interview status after completion
+                if (user?.id) {
+                  fetchWorkStyleInterviewStatus(user.id);
+                }
+              }}
+            />
+
+            <WorkStyleLiveKitInterviewDialog
+              isOpen={showWorkStyleLiveKitDialog}
+              onClose={() => setShowWorkStyleLiveKitDialog(false)}
               onInterviewComplete={() => {
                 // Refresh work style interview status after completion
                 if (user?.id) {
@@ -2161,6 +2342,209 @@ export default function BetaOnboarding() {
                 </TabsContent>
               </Tabs>
             </Card>
+          </div>
+        );
+
+      case 6:
+        return (
+          <div className="space-y-6">
+            <div className="text-center space-y-2">
+              <h2 className="text-2xl font-bold flex items-center justify-center gap-2">
+                <Mic className="w-6 h-6" />
+                Voice Clone
+              </h2>
+              <p className="text-muted-foreground">
+                Choose a voice for your AI digital twin in Profile interviews
+              </p>
+            </div>
+
+            <div className="flex justify-center">
+              <Card className="p-8 max-w-md w-full text-center space-y-6">
+                <div className="space-y-4">
+                  <h3 className="text-lg font-semibold">Select Your Voice</h3>
+                  <p className="text-sm text-muted-foreground">
+                    This voice will be used when recruiters interview your AI digital twin
+                  </p>
+
+                  <div className="space-y-3">
+                    {/* Male Voice Option */}
+                    <div className={`w-full p-4 border-2 rounded-lg transition-colors ${
+                      data.voiceClone.voiceType === "male"
+                        ? "border-primary bg-primary/10"
+                        : "border-muted hover:border-primary/50"
+                    }`}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center">
+                          <input
+                            type="radio"
+                            name="voiceSelection"
+                            checked={data.voiceClone.voiceType === "male"}
+                            onChange={() => setData(prev => ({
+                              ...prev,
+                              voiceClone: { ...prev.voiceClone, voiceType: "male", voiceId: VOICE_IDS.male }
+                            }))}
+                            className="w-4 h-4"
+                          />
+                          <span className="font-medium ml-3">Male Voice</span>
+                        </div>
+                        <button
+                          onClick={() => playVoiceSample('male')}
+                          className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+                          title="Preview male voice"
+                        >
+                          {playingVoice === 'male' ? (
+                            <StopCircle className="w-5 h-5 text-primary" />
+                          ) : (
+                            <Volume2 className="w-5 h-5 text-muted-foreground" />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Female Voice Option */}
+                    <div className={`w-full p-4 border-2 rounded-lg transition-colors ${
+                      data.voiceClone.voiceType === "female"
+                        ? "border-primary bg-primary/10"
+                        : "border-muted hover:border-primary/50"
+                    }`}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center">
+                          <input
+                            type="radio"
+                            name="voiceSelection"
+                            checked={data.voiceClone.voiceType === "female"}
+                            onChange={() => setData(prev => ({
+                              ...prev,
+                              voiceClone: { ...prev.voiceClone, voiceType: "female", voiceId: VOICE_IDS.female }
+                            }))}
+                            className="w-4 h-4"
+                          />
+                          <span className="font-medium ml-3">Female Voice</span>
+                        </div>
+                        <button
+                          onClick={() => playVoiceSample('female')}
+                          className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+                          title="Preview female voice"
+                        >
+                          {playingVoice === 'female' ? (
+                            <StopCircle className="w-5 h-5 text-primary" />
+                          ) : (
+                            <Volume2 className="w-5 h-5 text-muted-foreground" />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Clone Voice Option */}
+                    <div className={`w-full p-4 border-2 rounded-lg transition-colors ${
+                      data.voiceClone.voiceType === "cloned"
+                        ? "border-primary bg-primary/10"
+                        : "border-muted hover:border-primary/50"
+                    }`}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center">
+                          <input
+                            type="radio"
+                            name="voiceSelection"
+                            checked={data.voiceClone.voiceType === "cloned"}
+                            onChange={() => setData(prev => ({
+                              ...prev,
+                              voiceClone: { ...prev.voiceClone, voiceType: "cloned" }
+                            }))}
+                            className="w-4 h-4"
+                          />
+                          <span className="font-medium ml-3">Clone My Voice</span>
+                        </div>
+                        <button
+                          onClick={() => playVoiceSample('cloned')}
+                          className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+                          title="Preview cloned voice"
+                          disabled={!data.voiceClone.voiceId && data.voiceClone.voiceType === "cloned"}
+                        >
+                          {playingVoice === 'cloned' ? (
+                            <StopCircle className="w-5 h-5 text-primary" />
+                          ) : (
+                            <Volume2 className={`w-5 h-5 ${(!data.voiceClone.voiceId && data.voiceClone.voiceType === "cloned") ? "text-muted-foreground/50" : "text-muted-foreground"}`} />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Voice Recording Section for Clone Option */}
+                  {data.voiceClone.voiceType === "cloned" && (
+                    <div className="mt-6 p-4 bg-muted/50 rounded-lg space-y-4">
+                      <p className="text-sm text-muted-foreground">
+                        Record 10-15 seconds of clear speech for voice cloning
+                      </p>
+                      <VoiceRecorder
+                        onRecordingComplete={(audioBlob) => {
+                          setData(prev => ({
+                            ...prev,
+                            voiceClone: {
+                              ...prev.voiceClone,
+                              audioSample: audioBlob,
+                            }
+                          }));
+                        }}
+                        onCloneComplete={(voiceId) => {
+                          setData(prev => ({
+                            ...prev,
+                            voiceClone: {
+                              ...prev.voiceClone,
+                              voiceId: voiceId
+                            }
+                          }));
+                        }}
+                      />
+                      {data.voiceClone.audioSample && (
+                        <div className="flex items-center justify-between p-3 bg-green-50 border border-green-200 rounded-lg">
+                          <div className="flex items-center gap-2">
+                            <CheckCircle className="w-4 h-4 text-green-600" />
+                            <span className="text-sm text-green-800">Voice recorded successfully</span>
+                          </div>
+                          <button
+                            onClick={() => {
+                              // Play the recorded audio directly
+                              if (audioElement) {
+                                audioElement.pause();
+                                audioElement.currentTime = 0;
+                              }
+
+                              if (playingVoice === 'cloned') {
+                                setPlayingVoice(null);
+                                return;
+                              }
+
+                              const audioUrl = URL.createObjectURL(data.voiceClone.audioSample);
+                              const audio = new Audio(audioUrl);
+
+                              audio.onended = () => {
+                                setPlayingVoice(null);
+                                setAudioElement(null);
+                                URL.revokeObjectURL(audioUrl);
+                              };
+
+                              setPlayingVoice('cloned');
+                              setAudioElement(audio);
+                              audio.play();
+                            }}
+                            className="p-1 hover:bg-green-100 rounded-full transition-colors"
+                            title="Play recorded voice"
+                          >
+                            {playingVoice === 'cloned' ? (
+                              <StopCircle className="w-4 h-4 text-green-600" />
+                            ) : (
+                              <Volume2 className="w-4 h-4 text-green-600" />
+                            )}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </Card>
+            </div>
           </div>
         );
 

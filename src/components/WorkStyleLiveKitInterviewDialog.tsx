@@ -4,69 +4,34 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
-import { Mic, MicOff, Play, Pause, FileText, Clock, Target, TrendingUp, Loader2, AlertTriangle, Volume2, Briefcase } from "lucide-react";
+import { Mic, MicOff, Play, Pause, FileText, Clock, Target, TrendingUp, Loader2, AlertTriangle, Volume2, Users, Briefcase } from "lucide-react";
 import { LiveKitRoom, RoomAudioRenderer, useRoomContext, useParticipants, useDataChannel, useTracks } from '@livekit/components-react';
 import { Room, DataPacket_Kind, Participant, Track, RemoteParticipant } from 'livekit-client';
 import { useToast } from "@/hooks/use-toast";
 import { useAuthStore } from "@/store/authStore";
 
-// Define message type for LiveKit transcripts (same as EVIMessage structure)
+// Define message type for LiveKit transcripts
 type LiveKitMessage = {
   type: 'assistant_message' | 'user_message';
   content: string;
   timestamp: string;
 };
 
-interface Experience {
-  id: string;
-  jobTitle: string;
-  company: string;
-  location?: string;
-  employmentType?: string;
-  startDate: string;
-  endDate?: string;
-  isCurrentRole: boolean;
-  description?: string;
-  achievements?: string[];
-  keySkills?: string[];
-  interviewCompleted: boolean;
-  enrichedData?: any;
-  createdAt: string;
-}
-
-interface Job {
-  title: string;
-  company: string;
-  duration: string;
-  location: string;
-  description: string;
-  skills: string[];
-  software: string[];
-  aiSuggestedSkills: string[];
-  aiSuggestedSoftware: string[];
-  allExperiences?: Experience[];
-}
-
-interface ExperienceLiveKitInterviewDialogProps {
+interface WorkStyleLiveKitInterviewDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  job: Job | null;
-  experienceId?: string;
-  onInterviewComplete?: (enrichedData: any) => void;
+  onInterviewComplete?: (data: any) => void;
 }
 
-// Updated to match ProfileLiveKitInterviewDialog workflow
 type InterviewStage = 'initial' | 'connecting' | 'interviewing' | 'saving' | 'processing' | 'brief' | 'error';
 
-const INTERVIEW_DURATION = 15 * 60; // 15 minutes in seconds
+const INTERVIEW_DURATION = 10 * 60; // 10 minutes for work style interview
 
-export default function ExperienceLiveKitInterviewDialog({
+export default function WorkStyleLiveKitInterviewDialog({
   isOpen,
   onClose,
-  job,
-  experienceId,
   onInterviewComplete
-}: ExperienceLiveKitInterviewDialogProps) {
+}: WorkStyleLiveKitInterviewDialogProps) {
   const [stage, setStage] = useState<InterviewStage>('initial');
   const [transcript, setTranscript] = useState<LiveKitMessage[]>([]);
   const [currentTime, setCurrentTime] = useState(0);
@@ -90,7 +55,7 @@ export default function ExperienceLiveKitInterviewDialog({
   const [roomName, setRoomName] = useState<string | null>(null);
   const [serverUrl, setServerUrl] = useState<string | null>(null);
 
-  // Interview completion and insights state (matching ProfileLiveKitInterviewDialog)
+  // Interview completion and insights state
   const [interviewSummary, setInterviewSummary] = useState<any | null>(null);
   const [completedSessionId, setCompletedSessionId] = useState<string | null>(null);
   const [fullTranscriptFromDB, setFullTranscriptFromDB] = useState<LiveKitMessage[] | null>(null);
@@ -124,31 +89,12 @@ export default function ExperienceLiveKitInterviewDialog({
   };
 
   const handleStartInterview = async () => {
-    if (!job) {
-      toast({
-        title: "Error",
-        description: "No job data available for interview.",
-        variant: "destructive",
-      });
-      return;
-    }
-
     try {
       setStage('connecting');
       setConnectionStatus('connecting');
       setError(null);
 
-      console.log('🎯 Starting Experience Enhancement LiveKit interview...');
-
-      // Get the relevant experience data for the last 10 years
-      const experienceData = job.allExperiences ? {
-        experiences: job.allExperiences,
-        targetRole: {
-          title: job.title,
-          company: job.company,
-          description: job.description
-        }
-      } : null;
+      console.log('🎯 Starting Work Style LiveKit interview...');
 
       // Get auth token from Zustand store in localStorage
       const authStorage = localStorage.getItem('auth-storage');
@@ -161,13 +107,12 @@ export default function ExperienceLiveKitInterviewDialog({
         },
         body: JSON.stringify({
           candidateId: user?.id,
-          recruiterName: 'Recruiter',
-          recruiterTitle: 'Hiring Manager',
-          company: job.company,
-          jobTitle: job.title,
-          jobDescription: job.description,
-          interviewType: 'experience_enhancement',
-          experienceData: experienceData
+          recruiterName: 'Sarah',
+          recruiterTitle: 'Work Style Advisor',
+          company: 'Career Development',
+          jobTitle: 'Work Style & Career Goals',
+          jobDescription: 'Exploring work preferences and career aspirations',
+          interviewType: 'work_style'
         })
       });
 
@@ -177,7 +122,7 @@ export default function ExperienceLiveKitInterviewDialog({
       }
 
       const data = await response.json();
-      console.log('✅ LiveKit interview started:', data);
+      console.log('✅ LiveKit work style interview started:', data);
 
       // Store the connection details
       setLivekitToken(data.token);
@@ -222,7 +167,7 @@ export default function ExperienceLiveKitInterviewDialog({
       setStage('processing');
       setConnectionStatus('disconnected');
 
-      console.log('🏁 Ending Experience Enhancement LiveKit interview...');
+      console.log('🏁 Ending Work Style LiveKit interview...');
       console.log('📝 Final transcript length:', transcript.length);
 
       let finalTranscript = transcript;
@@ -230,10 +175,7 @@ export default function ExperienceLiveKitInterviewDialog({
 
       // Save transcript to backend using LiveKit interview endpoint
       if (finalSessionId) {
-        console.log('🔄 Saving Experience Enhancement interview transcript...');
-        console.log('📝 Transcript to save:', finalTranscript);
-        console.log('📝 Session ID (room name):', finalSessionId);
-        console.log('📝 Transcript length:', finalTranscript.length);
+        console.log('🔄 Saving Work Style interview transcript...');
 
         // Transform transcript to LiveKit format
         const transcriptForBackend = finalTranscript.map(msg => ({
@@ -241,17 +183,6 @@ export default function ExperienceLiveKitInterviewDialog({
           text: msg.content,
           timestamp: new Date(msg.timestamp).getTime()
         }));
-
-        console.log('🌐 Making API call to save interview...');
-        console.log('📍 API URL:', `${import.meta.env.VITE_API_URL}/livekit-interviews/complete`);
-        console.log('📊 Request payload:', {
-          roomName: finalSessionId,
-          candidateId: user?.id,
-          transcript: transcriptForBackend,
-          duration: currentTime,
-          interviewType: 'experience_enhancement',
-          experienceData: job?.allExperiences || {}
-        });
 
         const saveResponse = await fetch(`${import.meta.env.VITE_API_URL}/livekit-interviews/complete`, {
           method: 'POST',
@@ -261,8 +192,7 @@ export default function ExperienceLiveKitInterviewDialog({
             candidateId: user?.id,
             transcript: transcriptForBackend,
             duration: currentTime,
-            interviewType: 'experience_enhancement',
-            experienceData: job?.allExperiences ? { experiences: job.allExperiences } : {}
+            interviewType: 'work_style'
           })
         });
 
@@ -271,16 +201,10 @@ export default function ExperienceLiveKitInterviewDialog({
         if (saveResponse.ok) {
           const result = await saveResponse.json();
           console.log('✅ Transcript saved and insights extracted:', result);
-          console.log('🎯 Interview Summary received:', result);
-          // The response structure is { success: true, data: { highlights: {...} } }
           setInterviewSummary(result);
-          // Set the completed session ID for transcript retrieval
           setCompletedSessionId(finalSessionId);
         } else {
           console.error('❌ Failed to save transcript to backend');
-          console.error('📨 Response status:', saveResponse.status, saveResponse.statusText);
-          const errorText = await saveResponse.text();
-          console.error('📨 Error response:', errorText);
         }
       }
 
@@ -335,7 +259,7 @@ export default function ExperienceLiveKitInterviewDialog({
   };
 
   // Component to handle LiveKit room events
-  const ExperienceRoomContent = () => {
+  const WorkStyleRoomContent = () => {
     const room = useRoomContext();
     const participants = useParticipants();
     const tracks = useTracks();
@@ -469,16 +393,16 @@ export default function ExperienceLiveKitInterviewDialog({
       }
     }, [participants]);
 
-    // Timer effect for recording with auto-completion at 15 minutes
+    // Timer effect for recording with auto-completion at 10 minutes
     useEffect(() => {
       if (connectionStatus === 'connected') {
         interviewTimerRef.current = setInterval(() => {
           setCurrentTime(prev => {
             const newTime = prev + 1;
 
-            // Auto-complete at 15 minutes (900 seconds)
+            // Auto-complete at 10 minutes (600 seconds)
             if (newTime >= INTERVIEW_DURATION) {
-              console.log('⏰ 15-minute limit reached, auto-completing interview');
+              console.log('⏰ 10-minute limit reached, auto-completing interview');
               setShouldAutoComplete(true);
               return INTERVIEW_DURATION;
             }
@@ -505,19 +429,19 @@ export default function ExperienceLiveKitInterviewDialog({
     <div className="space-y-6">
       <div className="text-center space-y-4">
         <div className="relative inline-flex">
-          <div className="w-24 h-24 rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center">
+          <div className="w-24 h-24 rounded-full bg-gradient-to-br from-purple-500 to-indigo-600 flex items-center justify-center">
             <div className="w-8 h-8 border-4 border-white border-t-transparent rounded-full animate-spin" />
           </div>
         </div>
         <div className="space-y-2">
           <h3 className="text-xl font-semibold">Setting Up Your Interview</h3>
-          <p className="text-muted-foreground">Preparing your experience enhancement session...</p>
+          <p className="text-muted-foreground">Preparing your work style & career goals session...</p>
         </div>
       </div>
 
-      <Card className="p-4 bg-blue-50/50 border-blue-200">
+      <Card className="p-4 bg-purple-50/50 border-purple-200">
         <div className="space-y-2">
-          <div className="flex items-center gap-2 text-blue-600">
+          <div className="flex items-center gap-2 text-purple-600">
             <Clock className="w-4 h-4" />
             <span className="text-sm">Setting up voice connection...</span>
           </div>
@@ -549,7 +473,7 @@ export default function ExperienceLiveKitInterviewDialog({
             setConnectionStatus('disconnected');
           }}
         >
-          <ExperienceRoomContent />
+          <WorkStyleRoomContent />
           <RoomAudioRenderer />
           <div className="space-y-6">
             <div className="text-center space-y-4">
@@ -584,7 +508,7 @@ export default function ExperienceLiveKitInterviewDialog({
                   {isAIPlaying
                     ? "AI is Speaking"
                     : connectionStatus === 'connected'
-                    ? "Share Your Experience"
+                    ? "Share Your Work Style"
                     : "Connecting..."}
                 </h3>
                 <div className="flex items-center justify-center gap-4">
@@ -628,10 +552,10 @@ export default function ExperienceLiveKitInterviewDialog({
                     <div className={`max-w-[80%] p-3 rounded-lg ${
                       message.type === 'assistant_message'
                         ? 'bg-primary/10 border border-primary/20'
-                        : 'bg-blue-500 text-white'
+                        : 'bg-purple-500 text-white'
                     }`}>
                       <div className="text-xs font-medium mb-1 opacity-80">
-                        {message.type === 'assistant_message' ? 'AI Assistant' : 'You'}
+                        {message.type === 'assistant_message' ? 'Sarah' : 'You'}
                       </div>
                       <div className="text-sm">
                         {message.content}
@@ -657,7 +581,7 @@ export default function ExperienceLiveKitInterviewDialog({
                 <Button
                   onClick={handleCompleteInterview}
                   size="lg"
-                  className="bg-gradient-to-r from-primary to-blue-600 hover:opacity-90"
+                  className="bg-gradient-to-r from-primary to-purple-600 hover:opacity-90"
                   disabled={transcript.length === 0 || isCompleting}
                 >
                   {isCompleting ? (
@@ -724,7 +648,7 @@ export default function ExperienceLiveKitInterviewDialog({
     <div className="space-y-6">
       <div className="text-center space-y-4">
         <div className="relative inline-flex">
-          <div className="w-24 h-24 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center">
+          <div className="w-24 h-24 rounded-full bg-gradient-to-br from-purple-500 to-indigo-600 flex items-center justify-center">
             <div className="w-8 h-8 border-4 border-white border-t-transparent rounded-full animate-spin" />
           </div>
         </div>
@@ -732,9 +656,9 @@ export default function ExperienceLiveKitInterviewDialog({
         <p className="text-muted-foreground">Collecting final transcripts...</p>
       </div>
 
-      <Card className="p-6 border-blue-200 bg-blue-50/20">
+      <Card className="p-6 border-purple-200 bg-purple-50/20">
         <div className="space-y-3">
-          <div className="flex items-center gap-2 text-blue-600">
+          <div className="flex items-center gap-2 text-purple-600">
             <Clock className="w-4 h-4 animate-pulse" />
             <span className="text-sm">Please wait while we save your conversation</span>
           </div>
@@ -755,7 +679,7 @@ export default function ExperienceLiveKitInterviewDialog({
           </div>
         </div>
         <h3 className="text-xl font-semibold">Processing Interview</h3>
-        <p className="text-muted-foreground">Generating insights from your conversation...</p>
+        <p className="text-muted-foreground">Analyzing your work style preferences...</p>
       </div>
 
       <Card className="p-6">
@@ -766,15 +690,15 @@ export default function ExperienceLiveKitInterviewDialog({
           </div>
           <div className="flex items-center gap-2">
             <div className="w-4 h-4 rounded-full bg-primary animate-pulse" />
-            <span className="text-sm">Extracting experience details...</span>
+            <span className="text-sm">Identifying work style preferences...</span>
           </div>
           <div className="flex items-center gap-2">
             <div className="w-4 h-4 rounded-full bg-primary animate-pulse" />
-            <span className="text-sm">Identifying key achievements...</span>
+            <span className="text-sm">Extracting career goals...</span>
           </div>
           <div className="flex items-center gap-2">
             <div className="w-4 h-4 rounded-full bg-primary animate-pulse" />
-            <span className="text-sm">Generating experience summary...</span>
+            <span className="text-sm">Generating personalized insights...</span>
           </div>
         </div>
       </Card>
@@ -782,57 +706,64 @@ export default function ExperienceLiveKitInterviewDialog({
   );
 
   const renderBriefStage = () => {
-    // Parse the insights from backend - handle both interview types
-    let insights;
+    // Parse the insights from backend - check multiple possible locations
+    const insights = interviewSummary?.data?.highlights || interviewSummary?.highlights || interviewSummary || {
+      keyInsights: [],
+      workStylePreferences: "Your work style preferences have been captured.",
+      careerGoals: []
+    };
 
-    if (interviewSummary?.data?.achievements) {
-      // Experience enhancement interview - use achievements and brief
-      const achievements = interviewSummary.data.achievements;
-      const brief = interviewSummary.data.interviewBrief;
+    // Handle both string and object formats
+    let processedInsights: any = {};
 
-      insights = {
-        keyInsights: achievements.achievements?.map((achievement: any) => achievement.text) || [],
-        experienceHighlights: brief?.summary || "Experience insights have been processed. Please view transcript for full details.",
-        skillsIdentified: achievements.achievements?.filter((a: any) => a.category === 'technical').map((a: any) => a.text) || []
+    if (typeof insights === 'string') {
+      // If it's a string, use it as the main content
+      processedInsights = {
+        mainContent: insights,
+        keyInsights: [],
+        workStylePreferences: insights
       };
-    } else if (interviewSummary?.data?.highlights) {
-      // General interview - use highlights
-      insights = interviewSummary.data.highlights;
+    } else if (typeof insights === 'object') {
+      // If it's an object, use its properties
+      processedInsights = insights;
     } else {
       // Fallback
-      insights = {
+      processedInsights = {
         keyInsights: [],
-        experienceHighlights: "Experience insights are being processed. Please view transcript for full details.",
-        skillsIdentified: []
+        workStylePreferences: "Your work style preferences have been captured.",
+        careerGoals: []
       };
     }
+
+    // Also check for any AI-generated insights in the data
+    const aiInsights = interviewSummary?.data?.aiInsights || interviewSummary?.aiInsights || [];
 
     return (
       <div className="space-y-6">
         <div className="text-center space-y-4">
-          <div className="w-20 h-20 bg-gradient-to-br from-green-400 to-emerald-600 rounded-full flex items-center justify-center mx-auto shadow-lg">
+          <div className="w-20 h-20 bg-gradient-to-br from-purple-400 to-indigo-600 rounded-full flex items-center justify-center mx-auto shadow-lg">
             <Target className="w-10 h-10 text-white" />
           </div>
           <div>
-            <h3 className="text-xl font-semibold text-green-600">Experience Interview Completed!</h3>
-            <p className="text-muted-foreground">Here are the key insights from your experience discussion</p>
+            <h3 className="text-xl font-semibold text-purple-600">Work Style Interview Completed!</h3>
+            <p className="text-muted-foreground">Your preferences and goals have been captured</p>
           </div>
         </div>
 
         <div className="space-y-4">
-          {/* Key Insights */}
-          {insights.keyInsights && insights.keyInsights.length > 0 && (
-            <Card className="p-5 border-primary/20 bg-gradient-to-br from-primary/5 to-blue-500/5">
+          {/* AI Generated Insights if available */}
+          {aiInsights.length > 0 && (
+            <Card className="p-5 border-purple-200 bg-gradient-to-br from-purple-50 to-indigo-50">
               <div className="flex items-center gap-2 mb-4">
-                <div className="p-1.5 bg-primary/10 rounded-lg">
-                  <TrendingUp className="w-4 h-4 text-primary" />
+                <div className="p-1.5 bg-purple-100 rounded-lg">
+                  <TrendingUp className="w-4 h-4 text-purple-600" />
                 </div>
-                <h4 className="font-semibold text-lg">📊 Key Insights</h4>
+                <h4 className="font-semibold text-lg">💡 Key Insights from Interview</h4>
               </div>
               <ul className="text-sm space-y-3">
-                {insights.keyInsights.map((insight: string, index: number) => (
+                {aiInsights.map((insight: string, index: number) => (
                   <li key={index} className="flex items-start gap-3">
-                    <span className="text-primary font-bold mt-0.5">•</span>
+                    <span className="text-purple-600 font-bold mt-0.5">•</span>
                     <span className="leading-relaxed">{insight}</span>
                   </li>
                 ))}
@@ -840,27 +771,91 @@ export default function ExperienceLiveKitInterviewDialog({
             </Card>
           )}
 
-          {/* Experience Highlights */}
-          <Card className="p-5 border-blue-200 bg-gradient-to-br from-blue-50/50 to-indigo-50/50">
-            <div className="flex items-center gap-2 mb-4">
-              <div className="p-1.5 bg-blue-100 rounded-lg">
-                <Briefcase className="w-4 h-4 text-blue-600" />
+          {/* Key Insights if available in structured format */}
+          {processedInsights.keyInsights && processedInsights.keyInsights.length > 0 && (
+            <Card className="p-5 border-purple-200 bg-gradient-to-br from-purple-50 to-indigo-50">
+              <div className="flex items-center gap-2 mb-4">
+                <div className="p-1.5 bg-purple-100 rounded-lg">
+                  <TrendingUp className="w-4 h-4 text-purple-600" />
+                </div>
+                <h4 className="font-semibold text-lg">💡 Key Insights</h4>
               </div>
-              <h4 className="font-semibold text-lg text-blue-900">💼 Experience Highlights</h4>
-            </div>
-            <p className="text-sm text-gray-700 leading-relaxed mb-4">
-              {insights.experienceHighlights}
-            </p>
-            {insights.skillsIdentified && insights.skillsIdentified.length > 0 && (
-              <div className="flex flex-wrap gap-2 mt-3">
-                {insights.skillsIdentified.map((skill: string, index: number) => (
-                  <span key={index} className="px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-md">
-                    {skill}
-                  </span>
+              <ul className="text-sm space-y-3">
+                {processedInsights.keyInsights.map((insight: string, index: number) => (
+                  <li key={index} className="flex items-start gap-3">
+                    <span className="text-purple-600 font-bold mt-0.5">•</span>
+                    <span className="leading-relaxed">{insight}</span>
+                  </li>
                 ))}
+              </ul>
+            </Card>
+          )}
+
+          {/* Work Style Preferences */}
+          {processedInsights.workStyle && (
+            <Card className="p-5 border-indigo-200 bg-gradient-to-br from-indigo-50 to-purple-50">
+              <div className="flex items-center gap-2 mb-4">
+                <div className="p-1.5 bg-indigo-100 rounded-lg">
+                  <Users className="w-4 h-4 text-indigo-600" />
+                </div>
+                <h4 className="font-semibold text-lg text-indigo-900">🎯 Work Style & Preferences</h4>
               </div>
-            )}
-          </Card>
+              <div className="space-y-3 text-sm">
+                <div>
+                  <span className="font-medium">Preferred Environment:</span> {processedInsights.workStyle.preferredEnvironment}
+                </div>
+                <div>
+                  <span className="font-medium">Collaboration Style:</span> {processedInsights.workStyle.collaborationStyle}
+                </div>
+                <div>
+                  <span className="font-medium">Communication:</span> {processedInsights.workStyle.communicationPreferences}
+                </div>
+                <div>
+                  <span className="font-medium">Work Pace:</span> {processedInsights.workStyle.workPace}
+                </div>
+              </div>
+            </Card>
+          )}
+
+          {/* Strengths & Motivations */}
+          {(processedInsights.strengths?.length > 0 || processedInsights.motivations?.length > 0) && (
+            <Card className="p-5 border-blue-200 bg-gradient-to-br from-blue-50 to-sky-50">
+              <div className="flex items-center gap-2 mb-4">
+                <div className="p-1.5 bg-blue-100 rounded-lg">
+                  <TrendingUp className="w-4 h-4 text-blue-600" />
+                </div>
+                <h4 className="font-semibold text-lg text-blue-900">💪 Strengths & Motivations</h4>
+              </div>
+              <div className="space-y-3">
+                {processedInsights.strengths?.length > 0 && (
+                  <div>
+                    <span className="font-medium text-sm">Key Strengths:</span>
+                    <ul className="mt-1 text-sm space-y-1">
+                      {processedInsights.strengths.map((strength: string, index: number) => (
+                        <li key={index} className="flex items-start gap-2">
+                          <span className="text-blue-600">•</span>
+                          <span>{strength}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {processedInsights.motivations?.length > 0 && (
+                  <div>
+                    <span className="font-medium text-sm">Motivations:</span>
+                    <ul className="mt-1 text-sm space-y-1">
+                      {processedInsights.motivations.map((motivation: string, index: number) => (
+                        <li key={index} className="flex items-start gap-2">
+                          <span className="text-blue-600">•</span>
+                          <span>{motivation}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </Card>
+          )}
 
           {/* Interview Stats */}
           <Card className="p-4">
@@ -901,43 +896,6 @@ export default function ExperienceLiveKitInterviewDialog({
     );
   };
 
-  const renderCompletedStage = () => (
-    <div className="space-y-6">
-      <div className="text-center space-y-4">
-        <div className="w-20 h-20 bg-gradient-to-br from-green-400 to-emerald-600 rounded-full flex items-center justify-center mx-auto shadow-lg">
-          <Target className="w-10 h-10 text-white" />
-        </div>
-        <div>
-          <h3 className="text-xl font-semibold text-green-600">Experience Interview Completed!</h3>
-          <p className="text-muted-foreground">Your insights have been processed and will enhance your profile</p>
-        </div>
-      </div>
-
-      <Card className="p-4">
-        <div className="flex items-center gap-2 mb-3">
-          <Clock className="w-4 h-4 text-primary" />
-          <h4 className="font-medium">Interview Summary</h4>
-        </div>
-        <div className="grid grid-cols-2 gap-4 text-sm">
-          <div className="text-center">
-            <p className="text-2xl font-bold text-primary">{formatTime(currentTime)}</p>
-            <p className="text-muted-foreground">Duration</p>
-          </div>
-          <div className="text-center">
-            <p className="text-2xl font-bold text-primary">{transcript.filter(m => m.type === 'user_message').length}</p>
-            <p className="text-muted-foreground">Responses Shared</p>
-          </div>
-        </div>
-      </Card>
-
-      <div className="flex gap-3">
-        <Button onClick={handleClose} className="flex-1 bg-gradient-primary">
-          Done
-        </Button>
-      </div>
-    </div>
-  );
-
   const renderErrorStage = () => (
     <div className="space-y-6">
       <div className="text-center space-y-4">
@@ -971,32 +929,28 @@ export default function ExperienceLiveKitInterviewDialog({
     <div className="space-y-6">
       <div className="text-center space-y-6">
         <div>
-          <h3 className="text-2xl font-bold mb-2">Experience Enhancement Interview</h3>
-          <p className="text-lg text-muted-foreground">Share detailed insights about your professional journey</p>
+          <h3 className="text-2xl font-bold mb-2">Work Style & Career Goals Interview</h3>
+          <p className="text-lg text-muted-foreground">Explore your work preferences and future aspirations</p>
         </div>
       </div>
 
-      <Card className="p-6 border-primary/20 bg-gradient-to-br from-primary/5 to-blue-500/5">
+      <Card className="p-6 border-purple-200 bg-gradient-to-br from-purple-50 to-indigo-50">
         <h4 className="font-semibold mb-3 flex items-center gap-2">
-          <Target className="w-4 h-4 text-primary" />
+          <Target className="w-4 h-4 text-purple-600" />
           What to Expect
         </h4>
         <ul className="text-sm space-y-2 text-muted-foreground">
           <li className="flex items-start gap-2">
-            <span className="text-primary">•</span>
-            Deep dive into your recent experiences and achievements
+            <span className="text-purple-600">•</span>
+            Discussion about your ideal work environment
           </li>
           <li className="flex items-start gap-2">
-            <span className="text-primary">•</span>
-            Discussion of specific projects and their impact
+            <span className="text-purple-600">•</span>
+            Exploration of your career goals and aspirations
           </li>
           <li className="flex items-start gap-2">
-            <span className="text-primary">•</span>
-            Skills and competencies you've developed
-          </li>
-          <li className="flex items-start gap-2">
-            <span className="text-primary">•</span>
-            15-minute conversation to enrich your profile
+            <span className="text-purple-600">•</span>
+            Understanding your work-life balance preferences
           </li>
         </ul>
       </Card>
@@ -1007,7 +961,7 @@ export default function ExperienceLiveKitInterviewDialog({
         </Button>
         <Button
           onClick={handleStartInterview}
-          className="flex-1 bg-gradient-primary hover:opacity-90"
+          className="flex-1 bg-gradient-to-r from-purple-600 to-indigo-600 hover:opacity-90"
         >
           <Mic className="w-4 h-4 mr-2" />
           Start Interview
@@ -1021,7 +975,7 @@ export default function ExperienceLiveKitInterviewDialog({
     <Dialog open={isOpen} onOpenChange={handleClose}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="sr-only">Experience Enhancement Interview</DialogTitle>
+          <DialogTitle className="sr-only">Work Style & Career Goals Interview</DialogTitle>
         </DialogHeader>
         {stage === 'initial' && renderInitialStage()}
         {stage === 'connecting' && renderConnectingStage()}
@@ -1029,7 +983,6 @@ export default function ExperienceLiveKitInterviewDialog({
         {stage === 'saving' && renderSavingStage()}
         {stage === 'processing' && renderProcessingStage()}
         {stage === 'brief' && renderBriefStage()}
-        {stage === 'completed' && renderCompletedStage()}
         {stage === 'error' && renderErrorStage()}
       </DialogContent>
     </Dialog>
@@ -1047,7 +1000,7 @@ export default function ExperienceLiveKitInterviewDialog({
               <span>Duration: {formatTime(currentTime)}</span>
             </div>
             <Separator orientation="vertical" className="h-4" />
-            <span>Experience Enhancement Interview</span>
+            <span>Work Style & Career Goals Interview</span>
           </div>
           <Separator />
           <div className="space-y-4">
@@ -1074,12 +1027,12 @@ export default function ExperienceLiveKitInterviewDialog({
                 return (
                   <div key={index} className={`p-3 rounded-lg ${
                     message.type === 'assistant_message'
-                      ? 'bg-primary/5 border-l-4 border-primary'
+                      ? 'bg-purple-50 border-l-4 border-purple-500'
                       : 'bg-muted/50 border-l-4 border-muted-foreground'
                   }`}>
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-sm font-medium">
-                        {message.type === 'assistant_message' ? (job?.title || 'Digital Twin') : 'You'}
+                        {message.type === 'assistant_message' ? 'Sarah' : 'You'}
                       </span>
                       <span className="text-xs text-muted-foreground">
                         {message.timestamp ? new Date(message.timestamp).toLocaleTimeString() : ''}

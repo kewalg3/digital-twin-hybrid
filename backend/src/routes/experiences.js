@@ -1,8 +1,8 @@
 const express = require('express');
-const { PrismaClient } = require('@prisma/client');
+
 
 const router = express.Router();
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // Get all experiences for a specific user by userId (not requiring auth middleware)
 router.get('/:userId', async (req, res) => {
@@ -43,8 +43,9 @@ router.get('/:userId', async (req, res) => {
 // Get current user experiences (authenticated route)
 router.get('/', async (req, res) => {
   try {
+    // This route now requires auth middleware, so req.user will always exist
     const userId = req.user?.userId;
-    
+
     if (!userId) {
       return res.status(401).json({ error: 'User not authenticated' });
     }

@@ -65,7 +65,13 @@
       "Bash(npm run:*)",
       "Bash(npx vite:*)",
       "Read(//var/folders/7h/l6hf4d556l97gl5cjgxgc33m0000gn/T/TemporaryItems/NSIRD_screencaptureui_awFk5h/**)",
-      "Read(//var/folders/7h/l6hf4d556l97gl5cjgxgc33m0000gn/T/TemporaryItems/NSIRD_screencaptureui_TcKD2o/**)"
+      "Read(//var/folders/7h/l6hf4d556l97gl5cjgxgc33m0000gn/T/TemporaryItems/NSIRD_screencaptureui_TcKD2o/**)",
+      "Read(//dev/**)",
+      "Bash(npm cache clean:*)",
+      "Bash(npm install:*)",
+      "Bash(chmod:*)",
+      "Bash(./update_prisma.sh)",
+      "Bash(uv sync:*)"
     ],
     "deny": [],
     "ask": []

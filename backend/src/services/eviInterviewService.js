@@ -1,4 +1,4 @@
-const { PrismaClient } = require('@prisma/client');
+
 const OpenAI = require('openai');
 const { createClient } = require('@supabase/supabase-js');
 const ffmpeg = require('fluent-ffmpeg');
@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // Constants
 const WORK_STYLE_EXPERIENCE_ID = 'work-style-interview';

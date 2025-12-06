@@ -18,7 +18,7 @@ from livekit.agents import (
     cli,
     metrics,
 )
-from livekit.plugins import openai, hume, noise_cancellation
+from livekit.plugins import openai, hume, cartesia, noise_cancellation
 from tools import process_candidate_query
 
 logger = logging.getLogger("agent")
@@ -273,6 +273,8 @@ async def entrypoint(ctx: JobContext):
 
                         if candidate_data:
                             logger.info(f"Successfully fetched candidate data for: {candidate_data.get('fullName', 'Unknown')}")
+                            # Debug: Check what voice fields are in candidate_data
+                            logger.info(f"[DEBUG] Voice fields in candidate_data - profileVoiceId: {candidate_data.get('profileVoiceId')}, profileVoiceType: {candidate_data.get('profileVoiceType')}, clonedVoiceId: {candidate_data.get('clonedVoiceId')}")
 
                             # Include interview insights in candidate data
                             interview_insights = candidate_data.get('interviewInsights', [])
@@ -381,27 +383,44 @@ Remember: You're having a conversation, not giving a presentation. React to ques
     )
     logger.info("[OpenAI Realtime] Text mode with VAD enabled (200ms silence)")
 
-    # --- Hume TTS for high-quality voice output - Profile interviews only ---
+    # --- Cartesia TTS for voice cloning support - Profile interviews only ---
+    # Get user's voice preferences from candidate_data
+    user_voice_id = None
+    voice_type = "default"
+
+    if candidate_data:
+        user_voice_id = candidate_data.get('profileVoiceId')
+        voice_type = candidate_data.get('profileVoiceType', 'default')
+        logger.info(f"[VOICE] User voice preferences: type='{voice_type}', id='{user_voice_id}'")
+
     try:
-        tts = hume.TTS(
-            voice=hume.VoiceById(
-                id="09ad9404-502a-4d56-a1c4-7329f205fe2d",
-            ),
-            model_version="2",  # Use Octave 2 for 40% faster generation and better quality
-            speed=1.1,  # 10% faster for reduced latency
-            instant_mode=True,  # Significantly reduces TTS latency
-        )
-        logger.info("[HUME] TTS initialized with custom cloned voice for Profile interview")
+        if user_voice_id and voice_type in ['male', 'female', 'cloned']:
+            # Use user's selected/cloned voice
+            tts = cartesia.TTS(
+                model="sonic-2",
+                voice=user_voice_id,
+                speed=1.1,  # 10% faster for reduced latency
+            )
+            logger.info(f"[CARTESIA] TTS initialized with user's {voice_type} voice: {user_voice_id}")
+        else:
+            # Fallback to default professional voice
+            default_voice_id = "729651dc-c6c3-4ee5-97fa-350da1f88600"  # Professional male as default
+            tts = cartesia.TTS(
+                model="sonic-2",
+                voice=default_voice_id,
+                speed=1.1,
+            )
+            logger.info(f"[CARTESIA] TTS initialized with default voice: {default_voice_id}")
     except Exception as e:
-        logger.error(f"Failed to initialize Hume TTS with voice ID: {e}")
-        # Fallback to default voice
+        logger.error(f"Failed to initialize Cartesia TTS: {e}")
+        # Fallback to Hume TTS if Cartesia fails
         try:
             tts = hume.TTS(
                 model_version="2",
                 speed=1.1,
                 instant_mode=True,
             )
-            logger.info("[HUME] TTS initialized with default voice (fallback)")
+            logger.info("[HUME] TTS initialized as fallback from Cartesia failure")
         except Exception as e2:
             logger.error(f"Fallback TTS initialization failed: {e2}")
             raise e2
@@ -490,5 +509,5 @@ if __name__ == "__main__":
     cli.run_app(WorkerOptions(
         entrypoint_fnc=entrypoint,
         prewarm_fnc=prewarm,
-        agent_name="my-agent"  # Match the name used in backend dispatch
+        agent_name="digital-twin-interview"  # Profile interview agent name
     ))

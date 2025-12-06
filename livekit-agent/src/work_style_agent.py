@@ -18,7 +18,7 @@ from livekit.agents import (
     cli,
     metrics,
 )
-from livekit.plugins import openai, hume, noise_cancellation
+from livekit.plugins import openai, hume, noise_cancellation, google
 from work_style_tools import process_candidate_query
 
 logger = logging.getLogger("work_style_agent")
@@ -102,7 +102,7 @@ class WorkStyleRecruiter(Agent):
 The tone should be natural, friendly, and professional—showing empathy, curiosity, and brief humor when appropriate.
 Ask one clear question at a time and wait for the candidate's full response before continuing.
 
-IMPORTANT: Do NOT provide any greeting or introduction. The conversation has already begun with a greeting.
+IMPORTANT: Start the conversation by greeting the candidate warmly and introducing yourself as Sarah, then explain you'll be exploring their work style and career goals.
 
 CANDIDATE BACKGROUND:
 {career_summary}
@@ -230,8 +230,8 @@ Remember: You are conducting a thorough but conversational assessment of how the
 
 def prewarm(proc: JobProcess):
     """Preload models during worker startup to eliminate cold starts"""
-    # Using OpenAI's built-in VAD with text mode + Hume TTS
-    logger.info("Work Style Agent - Prewarm complete - using OpenAI VAD with Hume TTS")
+    # Using Gemini's native voice with built-in VAD
+    logger.info("Work Style Agent - Prewarm complete - using pure Gemini voice with Leda")
 
 
 async def entrypoint(ctx: JobContext):
@@ -323,52 +323,34 @@ async def entrypoint(ctx: JobContext):
     candidate_name = candidate_data.get('firstName', 'the candidate') if candidate_data else 'the candidate'
     candidate_full_name = candidate_data.get('fullName', candidate_name) if candidate_data else candidate_name
 
-    # -- Hybrid architecture: OpenAI Realtime (text mode + VAD) with Hume TTS
+    # -- Pure Gemini architecture: Gemini Live API with native voice (Callirhoe) + built-in VAD
 
-    # --- OpenAI Realtime with text-only mode but with turn detection ---
-    llm = openai.realtime.RealtimeModel(
-        modalities=["text"],  # Text-only mode for custom TTS
-        temperature=0.5,  # Optimized for natural conversation while reducing hallucinations
-        turn_detection={
-            "type": "server_vad",  # OpenAI's VAD works in text mode too!
-            "threshold": 0.5,
-            "prefix_padding_ms": 200,  # Reduced from 300ms default for faster response
-            "silence_duration_ms": 200,  # Reduced from 250ms for faster turn detection
-            "create_response": True,
-            "interrupt_response": True
-        },
+    # --- Gemini Live API with native voice and built-in VAD ---
+    llm = google.realtime.RealtimeModel(
+        model="gemini-2.5-flash-native-audio-preview-09-2025",
+        modalities=["AUDIO"],  # Native audio mode with Gemini voice
+        voice="Leda",  # Leda voice
+        temperature=0.7,  # Natural conversation flow
+        instructions=f"""You are conducting a warm work style interview with {candidate_full_name}.
+
+        Focus on understanding:
+        - Preferred work environment (remote/hybrid/office)
+        - Team collaboration style
+        - Communication preferences
+        - Career aspirations and goals
+        - Work-life balance priorities
+        - Management style preferences
+
+        Be conversational, empathetic, and encouraging. Ask follow-up questions to dive deeper into their responses.
+        Keep the tone professional yet friendly.""",
+        # Built-in VAD is enabled by default for optimal latency
     )
-    logger.info("[OpenAI Realtime] Text mode with VAD enabled (200ms silence)")
+    logger.info("[Gemini] Native audio mode with Callirhoe voice and built-in VAD")
 
-    # --- Hume TTS with Casual Podcast Host voice ---
-    try:
-        tts = hume.TTS(
-            voice=hume.VoiceById(
-                id="33045fd9-8010-43f6-b6b0-da3fbf326c29",  # Casual Podcast Host voice
-            ),
-            model_version="2",  # Use Octave 2 for 40% faster generation and better quality
-            speed=1.1,  # 10% faster for reduced latency
-            instant_mode=True,  # Significantly reduces TTS latency
-        )
-        logger.info("[HUME] TTS initialized with Casual Podcast Host voice for work style interview")
-    except Exception as e:
-        logger.error(f"Failed to initialize Hume TTS: {e}")
-        # Fallback - try without VoiceById parameters
-        try:
-            tts = hume.TTS(
-                model_version="2",
-                speed=1.1,
-                instant_mode=True,
-            )
-            logger.info("[HUME] TTS initialized with default voice (fallback)")
-        except Exception as e2:
-            logger.error(f"Fallback TTS initialization failed: {e2}")
-            raise e2
 
-    # Create session with hybrid configuration
+    # Create session with pure Gemini voice
     session = AgentSession(
-        llm=llm,
-        tts=tts,  # Using Hume TTS for output
+        llm=llm,  # Pure Gemini with native voice
     )
 
     # Optional: simple health logs
@@ -421,12 +403,9 @@ async def entrypoint(ctx: JobContext):
     # Send work style interview greeting
     candidate_name = candidate_data.get('firstName', 'there') if candidate_data else 'there'
 
-    # Generate work style focused greeting
-    initial_greeting = f"Hi {candidate_name}, I'm Sarah. Today we'll be exploring your work style and career goals to better understand how you like to work and what you're looking for in your next opportunity. This will help us match you with roles that align with your preferences and aspirations. Ready to dive in?"
-
-    # Send the greeting so agent speaks first
-    await session.say(initial_greeting)
-    logger.info(f"[WORK_STYLE_AGENT] Sent initial work style greeting to {candidate_name}")
+    # Note: With native Gemini audio mode, the agent will speak based on its instructions
+    # No manual greeting needed - Gemini handles conversation initiation
+    logger.info(f"[WORK_STYLE_AGENT] Agent ready for work style interview with {candidate_name}")
 
 
 if __name__ == "__main__":

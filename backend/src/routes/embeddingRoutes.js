@@ -207,8 +207,8 @@ router.post('/interview', authMiddleware, async (req, res) => {
 router.get('/status', authMiddleware, async (req, res) => {
   try {
     const userId = req.user.userId;
-    const { PrismaClient } = require('@prisma/client');
-    const prisma = new PrismaClient();
+    
+    const prisma = require('../lib/prisma');
 
     // Count chunks by source type
     const chunkCounts = await prisma.$queryRaw`

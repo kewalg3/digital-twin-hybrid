@@ -1,5 +1,5 @@
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+
+const prisma = require('../lib/prisma');
 
 class SoftwareController {
   // Add software via autocomplete
@@ -47,14 +47,15 @@ class SoftwareController {
     }
   }
 
-  // Get user's software
+  // Get user's software (authenticated)
   async getUserSoftware(req, res) {
     try {
-      const userId = req.user?.userId || req.query.userId;
+      // Now requires auth, so use req.user.userId
+      const userId = req.user?.userId;
 
       if (!userId) {
-        return res.status(400).json({
-          error: 'User ID is required'
+        return res.status(401).json({
+          error: 'User not authenticated'
         });
       }
 

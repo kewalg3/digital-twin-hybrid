@@ -1,9 +1,9 @@
-const { PrismaClient } = require('@prisma/client');
+
 const supabaseStorageService = require('../services/supabaseStorageService');
 const textKernelService = require('../services/textKernelService');
 const fallbackResumeParser = require('../services/fallbackResumeParser');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // Get base URL from environment or use localhost for development
 const BASE_URL = process.env.BASE_URL || 'http://localhost:3001';

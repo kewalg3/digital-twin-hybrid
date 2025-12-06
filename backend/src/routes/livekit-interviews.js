@@ -1,9 +1,9 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
-const { PrismaClient } = require('@prisma/client');
+
 const OpenAI = require('openai');
 
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 const router = express.Router();
 
 // Initialize OpenAI
@@ -32,6 +32,132 @@ const handleValidationErrors = (req, res, next) => {
   }
   next();
 };
+
+/**
+ * Extract work style insights for work style interviews using OpenAI
+ */
+async function extractWorkStyleInsights({ transcript }) {
+  try {
+    console.log('🧠 Extracting work style insights with OpenAI...');
+
+    // Format transcript for OpenAI (LiveKit format)
+    const transcriptText = transcript.map(entry =>
+      `${entry.speaker === 'agent' ? 'AI:' : 'Candidate:'} ${entry.text}`
+    ).join('\n');
+
+    const prompt = `Interview Transcript:
+${transcriptText}
+
+Extract the candidate's work style preferences and career goals based on this transcript.
+
+IMPORTANT: If the transcript is very brief or lacks substantial content, provide reasonable defaults and indicate that more discussion is needed rather than making assumptions.
+
+Return a JSON object in this exact format:
+{
+  "workStyle": {
+    "preferredEnvironment": "Description of ideal work environment",
+    "collaborationStyle": "How they work with others",
+    "communicationPreferences": "How they prefer to communicate",
+    "workPace": "fast-paced/steady/flexible",
+    "structurePreference": "structured/flexible/hybrid"
+  },
+  "careerGoals": {
+    "shortTerm": "1-2 year goals",
+    "longTerm": "3-5 year aspirations",
+    "idealRole": "Description of ideal next position",
+    "industries": ["interested industries"],
+    "companySize": "startup/mid-size/enterprise/flexible"
+  },
+  "strengths": [
+    "Key personal strength 1",
+    "Key personal strength 2"
+  ],
+  "motivations": [
+    "What drives them professionally",
+    "What they find fulfilling"
+  ]
+}
+
+Extract insights directly from the transcript. Do not make assumptions beyond what was discussed.`;
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4",
+      messages: [
+        {
+          role: "system",
+          content: "You are a professional career counselor analyzing work style preferences and career aspirations. Extract structured insights about how the candidate likes to work and what they're looking for in their career. Return only valid JSON."
+        },
+        {
+          role: "user",
+          content: prompt
+        }
+      ],
+      temperature: 0.3,
+      max_tokens: 1500
+    });
+
+    const aiResponse = response.choices[0].message.content.trim();
+    console.log('🤖 OpenAI work style response generated');
+
+    // Parse JSON response
+    let insights;
+    try {
+      insights = JSON.parse(aiResponse);
+
+      // Validate that we have the expected structure
+      if (!insights.workStyle || !insights.careerGoals) {
+        throw new Error('Invalid response structure from OpenAI');
+      }
+
+      console.log('✅ Successfully parsed work style insights');
+    } catch (parseError) {
+      console.warn('⚠️ Failed to parse OpenAI JSON, creating fallback structure:', parseError);
+      // Fallback: create basic structure
+      insights = {
+        workStyle: {
+          preferredEnvironment: "Professional environment with growth opportunities",
+          collaborationStyle: "Team-oriented with independent work capability",
+          communicationPreferences: "Clear and direct communication",
+          workPace: "flexible",
+          structurePreference: "hybrid"
+        },
+        careerGoals: {
+          shortTerm: "Continue developing professional skills",
+          longTerm: "Advance in career with increasing responsibilities",
+          idealRole: "Role that matches skills and interests",
+          industries: ["technology"],
+          companySize: "flexible"
+        },
+        strengths: ["Professional communication", "Adaptability"],
+        motivations: ["Professional growth", "Making an impact"]
+      };
+    }
+
+    return insights;
+
+  } catch (error) {
+    console.error('❌ Error extracting work style insights:', error);
+    // Return fallback insights
+    return {
+      workStyle: {
+        preferredEnvironment: "Unable to extract from interview",
+        collaborationStyle: "Unable to extract from interview",
+        communicationPreferences: "Unable to extract from interview",
+        workPace: "unknown",
+        structurePreference: "unknown"
+      },
+      careerGoals: {
+        shortTerm: "Unable to extract from interview",
+        longTerm: "Unable to extract from interview",
+        idealRole: "Unable to extract from interview",
+        industries: [],
+        companySize: "unknown"
+      },
+      strengths: [],
+      motivations: []
+    };
+  }
+}
 
 /**
  * Extract achievements for experience enhancement interviews using OpenAI
@@ -196,6 +322,70 @@ ${transcriptText}`;
 }
 
 /**
+ * Generate interview brief for work style interviews using OpenAI
+ */
+async function generateWorkStyleBrief(transcript) {
+  try {
+    console.log('📝 Generating work style interview brief...');
+
+    // Format transcript for OpenAI
+    const transcriptText = transcript.map(entry =>
+      `${entry.speaker === 'agent' ? 'AI:' : 'Candidate:'} ${entry.text}`
+    ).join('\n');
+
+    const prompt = `Based on this work style interview transcript, create a concise brief summarizing:
+1. Work environment preferences (remote/hybrid/office, team size, company culture)
+2. Key personality traits and work characteristics
+3. Team collaboration and communication style
+4. Career aspirations and growth goals
+5. Management and leadership preferences
+
+Only include information explicitly stated in the transcript. Do not make assumptions or infer details not mentioned.
+Keep the brief under 200 words, focusing on practical insights that would help with team fit and role alignment.
+
+Transcript:
+${transcriptText}`;
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4",
+      messages: [
+        {
+          role: "system",
+          content: "You are a professional career counselor creating concise work style briefs from interview transcripts. Focus on practical insights about work preferences, personality traits, and career goals. Only use information explicitly stated. Never make assumptions or add information not in the transcript."
+        },
+        {
+          role: "user",
+          content: prompt
+        }
+      ],
+      temperature: 0.3,
+      max_tokens: 400
+    });
+
+    const brief = response.choices[0].message.content.trim();
+    console.log('✅ Work style brief generated successfully');
+
+    return {
+      summary: brief,
+      generatedAt: new Date().toISOString(),
+      wordCount: brief.split(' ').length,
+      type: 'work_style'
+    };
+
+  } catch (error) {
+    console.error('❌ Error generating work style brief:', error);
+    // Return a fallback brief
+    return {
+      summary: "Work style interview transcript processed. Please refer to full transcript for details.",
+      generatedAt: new Date().toISOString(),
+      wordCount: 0,
+      type: 'work_style',
+      error: true
+    };
+  }
+}
+
+/**
  * Generate interview highlights using OpenAI
  */
 async function generateHighlights(transcript) {
@@ -293,6 +483,12 @@ router.post('/complete', validateCompleteInterview, handleValidationErrors, asyn
 
       // Set highlights to null for experience enhancement interviews (UI will use achievements instead)
       highlights = null;
+    } else if (interviewType === 'work_style') {
+      console.log('🎯 Processing work style interview...');
+      // For work style interviews, extract insights about work preferences and career goals
+      highlights = await extractWorkStyleInsights({ transcript });
+      interviewBrief = await generateWorkStyleBrief(transcript);
+      achievements = null;
     } else {
       console.log('🤖 Generating standard interview highlights...');
       // For regular interviews, generate highlights as before
@@ -435,6 +631,112 @@ router.get('/candidate/:candidateId', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to fetch interview history',
+      details: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/livekit-interviews/candidate/:candidateId/briefs
+ * Get all interview briefs for a candidate to display in profile
+ */
+router.get('/candidate/:candidateId/briefs', async (req, res) => {
+  try {
+    const { candidateId } = req.params;
+    const { includeTranscripts = false } = req.query;
+
+    console.log(`📚 Fetching interview briefs for candidate: ${candidateId}`);
+
+    // Fetch all completed interview sessions with briefs
+    const sessions = await prisma.liveKitInterviewSession.findMany({
+      where: {
+        candidateId,
+        status: 'completed'
+      },
+      orderBy: { completedAt: 'desc' },
+      select: {
+        id: true,
+        roomName: true,
+        interviewType: true,
+        interviewBrief: true,
+        highlights: true,
+        achievements: true,
+        duration: true,
+        startedAt: true,
+        completedAt: true,
+        experienceData: true,
+        recruiter: {
+          select: {
+            id: true,
+            name: true,
+            company: true,
+            title: true
+          }
+        },
+        // Optionally include transcript if requested
+        ...(includeTranscripts && { transcript: true })
+      }
+    });
+
+    // Also check for EVI interview sessions (different table)
+    const eviSessions = await prisma.eVIInterviewSession.findMany({
+      where: { candidateId },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        sessionId: true,
+        interviewBrief: true,
+        achievements: true,
+        experienceData: true,
+        duration: true,
+        createdAt: true
+      }
+    });
+
+    // Transform data for frontend consumption
+    const briefs = {
+      livekitInterviews: sessions.map(session => ({
+        id: session.id,
+        type: session.interviewType || 'general',
+        brief: session.interviewBrief,
+        highlights: session.highlights,
+        achievements: session.achievements,
+        duration: session.duration,
+        date: session.completedAt || session.startedAt,
+        recruiter: session.recruiter,
+        experienceData: session.experienceData
+      })),
+      eviInterviews: eviSessions.map(session => ({
+        id: session.id,
+        type: 'experience_enhancement_evi',
+        brief: session.interviewBrief,
+        achievements: session.achievements,
+        duration: session.duration,
+        date: session.createdAt,
+        experienceData: session.experienceData
+      })),
+      summary: {
+        totalInterviews: sessions.length + eviSessions.length,
+        byType: {
+          experience: sessions.filter(s => s.interviewType === 'experience_enhancement').length + eviSessions.length,
+          workStyle: sessions.filter(s => s.interviewType === 'work_style').length,
+          general: sessions.filter(s => s.interviewType === 'general' || !s.interviewType).length
+        }
+      }
+    };
+
+    console.log(`✅ Found ${briefs.summary.totalInterviews} interview briefs`);
+
+    res.json({
+      success: true,
+      data: briefs
+    });
+
+  } catch (error) {
+    console.error('❌ Error fetching interview briefs:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch interview briefs',
       details: error.message
     });
   }

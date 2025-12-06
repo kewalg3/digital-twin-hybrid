@@ -7,13 +7,19 @@ const rateLimit = require('express-rate-limit');
 const fileUpload = require('express-fileupload');
 const { createServer } = require('http');
 // Removed Socket.IO - using direct Hume WebSocket instead
+
+// IMPORTANT: Development Environment Note
+// ========================================
+// Ensure only ONE backend Node process runs at a time to avoid Prisma/pgBouncer conflicts
+// Before starting: pkill -f node (to kill all Node processes)
+// Start backend: npm start (single instance only)
+// ========================================
+
 // Load environment-specific .env file
 const envFile = process.env.NODE_ENV === 'production' ? '.env.production' : '.env.development';
 require('dotenv').config({ path: envFile });
 console.log(`🔧 Loaded environment: ${process.env.NODE_ENV || 'development'} from ${envFile}`);
 
-
-const { PrismaClient } = require('@prisma/client');
 const authRoutes = require('./routes/auth');
 const resumeRoutes = require('./routes/resumes');
 const interviewRoutes = require('./routes/interviews');
@@ -29,6 +35,7 @@ const skillRoutes = require('./routes/skills');
 const skillsetRoutes = require('./routes/skillsets');
 const softwareRoutes = require('./routes/software');
 const autocompleteRoutes = require('./routes/autocomplete');
+const voiceCloneRoutes = require('./routes/voiceClone');
 const errorHandler = require('./middleware/errorHandler');
 const authMiddleware = require('./middleware/auth');
 
@@ -42,7 +49,7 @@ app.set('trust proxy', true);
 
 // Removed Socket.IO initialization - using direct Hume WebSocket API calls instead
 
-const prisma = new PrismaClient();
+const prisma = require('./lib/prisma');
 
 // Global middleware
 app.use(helmet());
@@ -104,6 +111,10 @@ app.use('/api/', limiter);
 app.use('/api/voice-interview/audio', voiceLimiter);
 app.use('/api/evi-interview/audio', voiceLimiter);
 
+// CRITICAL: Voice upload routes MUST come BEFORE body parsers
+// This allows multer to handle multipart/form-data before express.json() consumes the stream
+app.use('/api/voice', authMiddleware, voiceCloneRoutes);
+
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -150,6 +161,7 @@ app.use('/api/interview', interviewAPIRoutes); // Single endpoint approach
 app.use('/api/evi-interviews', eviInterviewRoutes); // NEW: EVI interview completion processing
 app.use('/api/livekit-interviews', require('./routes/livekit-interviews')); // NEW: LiveKit interview completion
 app.use('/api/onboarding', onboardingRoutes); // NEW: Unified onboarding API
+// Voice cloning API moved above body parsers to fix multer parsing
 // Apply auth middleware selectively for user routes
 app.use('/api/users', (req, res, next) => {
   // Skip auth for public profile endpoint
@@ -159,10 +171,10 @@ app.use('/api/users', (req, res, next) => {
   // Apply auth middleware for all other user routes
   authMiddleware(req, res, next);
 }, userRoutes);
-app.use('/api/experiences', experienceRoutes); // No auth for testing
+app.use('/api/experiences', authMiddleware, experienceRoutes); // Protected - for editing own experiences
 app.use('/api/skills', authMiddleware, skillRoutes);
-app.use('/api/skillsets', skillsetRoutes); // No auth for testing
-app.use('/api/software', softwareRoutes); // No auth for testing
+app.use('/api/skillsets', authMiddleware, skillsetRoutes); // Protected - for editing own skillsets
+app.use('/api/software', authMiddleware, softwareRoutes); // Protected - for editing own software
 app.use('/api/autocomplete', autocompleteRoutes); // No auth for autocomplete
 
 // Socket.IO WebSocket handling removed - using direct Hume WebSocket API calls instead

@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+
+const prisma = require('../lib/prisma');
 
 // Only initialize LiveKit if environment variables are present
 let agentDispatchClient;
@@ -174,9 +174,18 @@ router.post('/start', async (req, res) => {
 
         console.log('🚀 Dispatching agent with metadata:', dispatchMetadata);
 
+        // Determine which agent to dispatch to based on interview type
+        const agentName = interviewType === 'experience_enhancement'
+            ? 'experience-enhancement-agent'
+            : interviewType === 'work_style'
+            ? 'work-style-agent'
+            : 'digital-twin-interview';
+
+        console.log(`📋 Dispatching to agent: ${agentName} (interview type: ${interviewType})`);
+
         const dispatch = await agentDispatchClient.createDispatch(
             roomName,
-            'my-agent', // Your agent name
+            agentName, // Route to appropriate agent based on interview type
             {
                 metadata: dispatchMetadata  // Wrap in object as per LiveKit docs
             }
