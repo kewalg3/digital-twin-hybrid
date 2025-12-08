@@ -34,9 +34,6 @@ router.get('/profile/:userId', async (req, res) => {
         // Don't expose email or phone in public profile
         // Voice preferences for interview TTS
         profileVoiceId: true,
-        profileVoiceType: true,
-        clonedVoiceId: true,
-        voiceCloneStatus: true,
         resumes: {
           select: {
             id: true,
@@ -133,10 +130,7 @@ router.get('/profile/:userId', async (req, res) => {
       // Include interview insights for richer context
       interviewInsights: user.eviInterviewSessions || [],
       // Include voice preferences for TTS
-      profileVoiceId: user.profileVoiceId,
-      profileVoiceType: user.profileVoiceType,
-      clonedVoiceId: user.clonedVoiceId,
-      voiceCloneStatus: user.voiceCloneStatus
+      profileVoiceId: user.profileVoiceId
     };
 
     console.log('✅ Public profile fetched successfully for:', userId);
@@ -149,6 +143,37 @@ router.get('/profile/:userId', async (req, res) => {
     res.status(500).json({ 
       success: false,
       error: 'Internal server error' 
+    });
+  }
+});
+
+// Get voice preferences for a specific user (lightweight endpoint for agents)
+router.get('/voice/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    console.log('🔍 Fetching voice preferences for user:', userId);
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        profileVoiceId: true
+      }
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    console.log('✅ Voice preferences fetched successfully for:', userId);
+    res.json({
+      success: true,
+      profileVoiceId: user.profileVoiceId
+    });
+  } catch (error) {
+    console.error('Get voice preferences error:', error);
+    res.status(500).json({
+      error: 'Internal server error'
     });
   }
 });
